@@ -1,0 +1,78 @@
+name: Android CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, unit tests and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+          validate-wrappers: true
+          dependency-graph: disabled
+          build-scan-publish: false
+
+      - name: Ensure Android SDK packages
+        run: |
+          sdk_bin="$ANDROID_HOME/cmdline-tools/latest/bin"
+          # API 37's package includes the minor version; use the installed CLI's syntax.
+          if [[ -x "$sdk_bin/android" ]]; then
+            "$sdk_bin/android" --no-metrics --sdk="$ANDROID_HOME" sdk install platforms/android-37.0
+            "$sdk_bin/android" --no-metrics --sdk="$ANDROID_HOME" sdk install build-tools/36.0.0
+          else
+            "$sdk_bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+              'platforms;android-37.0' 'build-tools;36.0.0' </dev/null
+          fi
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
+
+      - name: Build debug APK, run unit tests and lint
+        # Wire-protocol SMB tests explicitly skip without FILEACCESS_SMB_TEST_PYTHON.
+        # Device/Keystore/media tests require the separate Android 16 test setup.
+        run: |
+          ./gradlew --no-daemon --stacktrace --console=plain --max-workers=2 \
+            :app:assembleDebug :app:testDebugUnitTest :app:lintDebug \
+            :core:model:test :core:storage-api:test \
+            :core:security:testDebugUnitTest :core:data:testDebugUnitTest \
+            :core:transfer:testDebugUnitTest :protocol:smb:testDebugUnitTest
+
+      - name: Save test and lint reports
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-check-reports
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            app/build/reports/lint-results-debug.*

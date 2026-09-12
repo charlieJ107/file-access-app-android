@@ -1,0 +1,41 @@
+# Machine state and generated output
+*.iml
+.gradle/
+.kotlin/
+/.tmp/
+.idea/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
+Thumbs.db
+local.properties
+
+# Local credentials, signing material, and personal NAS fixtures
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+keystore.properties
+secrets/
+.test-secrets/
+*.hprof
+
+# Packaged apps, local databases, and test logs belong in build artifacts.
+*.apk
+*.aab
+*.apks
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pem
+*.p12
+*.pfx
+*.key
+credentials.json
+service-account*.json
+
+# Keep Room schema JSON in source control.

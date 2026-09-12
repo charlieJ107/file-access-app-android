@@ -1,0 +1,21 @@
+# Normalize source files across Windows, Linux, and macOS.
+* text=auto eol=lf
+*.bat text eol=crlf
+gradlew text eol=lf
+
+# Keep binary assets and the Gradle wrapper unchanged.
+*.jar binary
+*.zip binary
+*.apk binary
+*.aab binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.mp3 binary
+*.mp4 binary
+*.wav binary
+*.woff2 binary

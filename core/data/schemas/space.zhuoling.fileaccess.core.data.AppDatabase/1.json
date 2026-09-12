@@ -1,0 +1,472 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "b0459b74923ec4ca804c120b84d95b12",
+    "entities": [
+      {
+        "tableName": "connections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `protocol` TEXT NOT NULL, `host` TEXT NOT NULL, `port` INTEGER NOT NULL, `share` TEXT NOT NULL, `rootPath` TEXT NOT NULL, `username` TEXT NOT NULL, `domain` TEXT NOT NULL, `requireEncryption` INTEGER NOT NULL, `revision` INTEGER NOT NULL, `credentialRef` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "protocol",
+            "columnName": "protocol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "host",
+            "columnName": "host",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "port",
+            "columnName": "port",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "share",
+            "columnName": "share",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rootPath",
+            "columnName": "rootPath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requireEncryption",
+            "columnName": "requireEncryption",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialRef",
+            "columnName": "credentialRef",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "transfer_tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `operationId` TEXT NOT NULL, `direction` TEXT NOT NULL, `connectionId` TEXT NOT NULL, `remoteOpaqueId` TEXT NOT NULL, `localUri` TEXT NOT NULL, `name` TEXT NOT NULL, `mimeType` TEXT, `totalBytes` INTEGER, `confirmedBytes` INTEGER NOT NULL, `connectionRevision` INTEGER NOT NULL, `sourceRevision` TEXT, `state` TEXT NOT NULL, `error` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `attempt` INTEGER NOT NULL, `backupRuleId` TEXT, `logicalSourceId` TEXT, `sourceGeneration` TEXT, `leaseOwner` TEXT, `leaseGeneration` INTEGER NOT NULL, `leaseExpiresAt` INTEGER NOT NULL, `retryAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operationId",
+            "columnName": "operationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectionId",
+            "columnName": "connectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteOpaqueId",
+            "columnName": "remoteOpaqueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUri",
+            "columnName": "localUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "confirmedBytes",
+            "columnName": "confirmedBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectionRevision",
+            "columnName": "connectionRevision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRevision",
+            "columnName": "sourceRevision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempt",
+            "columnName": "attempt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "backupRuleId",
+            "columnName": "backupRuleId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "logicalSourceId",
+            "columnName": "logicalSourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceGeneration",
+            "columnName": "sourceGeneration",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "leaseOwner",
+            "columnName": "leaseOwner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "leaseGeneration",
+            "columnName": "leaseGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "leaseExpiresAt",
+            "columnName": "leaseExpiresAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retryAt",
+            "columnName": "retryAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_transfer_tasks_operationId",
+            "unique": true,
+            "columnNames": [
+              "operationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_transfer_tasks_operationId` ON `${TABLE_NAME}` (`operationId`)"
+          },
+          {
+            "name": "index_transfer_tasks_state_retryAt",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "retryAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_tasks_state_retryAt` ON `${TABLE_NAME}` (`state`, `retryAt`)"
+          },
+          {
+            "name": "index_transfer_tasks_connectionId",
+            "unique": false,
+            "columnNames": [
+              "connectionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_tasks_connectionId` ON `${TABLE_NAME}` (`connectionId`)"
+          },
+          {
+            "name": "index_transfer_tasks_backupRuleId_logicalSourceId",
+            "unique": false,
+            "columnNames": [
+              "backupRuleId",
+              "logicalSourceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_tasks_backupRuleId_logicalSourceId` ON `${TABLE_NAME}` (`backupRuleId`, `logicalSourceId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "backup_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `sourceTreeUri` TEXT NOT NULL, `sourceKind` TEXT NOT NULL, `connectionId` TEXT NOT NULL, `remoteOpaqueId` TEXT NOT NULL, `wifiOnly` INTEGER NOT NULL, `unmeteredOnly` INTEGER NOT NULL, `chargingOnly` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `lastCheck` INTEGER, `lastSuccess` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceTreeUri",
+            "columnName": "sourceTreeUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceKind",
+            "columnName": "sourceKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectionId",
+            "columnName": "connectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteOpaqueId",
+            "columnName": "remoteOpaqueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiOnly",
+            "columnName": "wifiOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unmeteredOnly",
+            "columnName": "unmeteredOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chargingOnly",
+            "columnName": "chargingOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastCheck",
+            "columnName": "lastCheck",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccess",
+            "columnName": "lastSuccess",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_backup_rules_connectionId",
+            "unique": false,
+            "columnNames": [
+              "connectionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_backup_rules_connectionId` ON `${TABLE_NAME}` (`connectionId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "backup_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ruleId` TEXT NOT NULL, `logicalSourceId` TEXT NOT NULL, `sourceGeneration` TEXT NOT NULL, `connectionId` TEXT NOT NULL, `remoteOpaqueId` TEXT NOT NULL, `remoteRevision` TEXT, `verifiedBytes` INTEGER, `verifiedAt` INTEGER NOT NULL, `sourceCreatedAt` INTEGER NOT NULL, PRIMARY KEY(`ruleId`, `logicalSourceId`))",
+        "fields": [
+          {
+            "fieldPath": "ruleId",
+            "columnName": "ruleId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "logicalSourceId",
+            "columnName": "logicalSourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceGeneration",
+            "columnName": "sourceGeneration",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectionId",
+            "columnName": "connectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteOpaqueId",
+            "columnName": "remoteOpaqueId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteRevision",
+            "columnName": "remoteRevision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "verifiedBytes",
+            "columnName": "verifiedBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "verifiedAt",
+            "columnName": "verifiedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceCreatedAt",
+            "columnName": "sourceCreatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ruleId",
+            "logicalSourceId"
+          ]
+        }
+      },
+      {
+        "tableName": "backup_scan_cursors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ruleId` TEXT NOT NULL, `payload` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`ruleId`))",
+        "fields": [
+          {
+            "fieldPath": "ruleId",
+            "columnName": "ruleId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ruleId"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b0459b74923ec4ca804c120b84d95b12')"
+    ]
+  }
+}
