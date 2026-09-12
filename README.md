@@ -16,6 +16,8 @@ GitHub 仓库：[charlieJ107/file-access-app-android](https://github.com/charlie
 
 开发协作见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全报告见 [SECURITY.md](SECURITY.md)。
 
+[Android CI](https://github.com/charlieJ107/file-access-app-android/actions/workflows/android-ci.yml) 在 `master` 推送和 PR 时执行 Debug 构建、JVM 单元测试及 Lint，测试报告保留 7 天。真实 SMB 网络测试和 Android 设备测试需要单独准备隔离环境，不计入默认 CI 的通过范围。
+
 ## 运行
 
 在 Android Studio 打开此目录，配置 Android SDK 37，然后选择 `app` 运行；最低 Android 15。命令行可执行：

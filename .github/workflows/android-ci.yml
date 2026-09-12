@@ -75,4 +75,5 @@ jobs:
           path: |
             **/build/test-results/**/*.xml
             **/build/reports/tests/**
+            **/build/reports/dependency-verification/**
             app/build/reports/lint-results-debug.*
