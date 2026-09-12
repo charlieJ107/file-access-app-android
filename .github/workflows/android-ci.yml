@@ -59,7 +59,7 @@ jobs:
         # Wire-protocol SMB tests explicitly skip without FILEACCESS_SMB_TEST_PYTHON.
         # Device/Keystore/media tests require the separate Android 16 test setup.
         run: |
-          ./gradlew --no-daemon --stacktrace --console=plain --max-workers=2 \
+          ./gradlew --no-daemon --continue --stacktrace --console=plain --max-workers=2 \
             :app:assembleDebug :app:testDebugUnitTest :app:lintDebug \
             :core:model:test :core:storage-api:test \
             :core:security:testDebugUnitTest :core:data:testDebugUnitTest \
