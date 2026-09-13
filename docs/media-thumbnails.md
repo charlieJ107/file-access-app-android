@@ -51,13 +51,13 @@
 
 最后一次真实 SMB 样本记录：2220 字节的生成 PNG 读取 2220 字节、生成耗时 47 ms；12,587,476 字节视频读取 138,003 字节、耗时 410 ms，包含直接跳转到文件尾部的读取。这是本机 fixture 的单次观察，不代表真实 NAS 吞吐或照片性能基准。
 
-本机生成证据（不提交构建输出）：
+本机生成的测试日志（不提交构建输出）；脱敏截图另存入文档目录供 PR 审查：
 
 - `build/media-validation/final-build.log`
 - `build/media-validation/final-device-tests.log`（完整 29 项）
 - `build/media-validation/final-media-tests.log`（最终媒体 14 项）
 - `build/media-validation/media-metrics.log`、`crash.log`
-- [网格截图](../build/media-validation/grid.png)、[列表截图](../build/media-validation/list.png)：使用合成色块图片检查布局，不包含个人媒体。
+- [网格截图](images/media/grid.png)、[列表截图](images/media/list.png)：使用合成色块图片检查布局，不包含个人媒体。
 
 复现构建：
 
