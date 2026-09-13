@@ -30,7 +30,6 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -116,6 +115,7 @@ class SmbStorageProvider(
 }
 
 private const val BUFFER_SIZE = 256 * 1024
+internal const val UPLOAD_CHECKPOINT_BYTES = 4L * 1024 * 1024
 private val READ_SHARES = setOf(FILE_SHARE_READ)
 private val NO_FOLLOW = setOf(FILE_OPEN_REPARSE_POINT)
 
@@ -139,7 +139,7 @@ internal class SmbStorageSession(
     private val share: DiskShare,
     protection: TransportProtection,
     private val io: CoroutineDispatcher,
-) : StorageSession, UploadCapability, MutationCapability {
+) : StorageSession, UploadCapability, UploadCleanupCapability, MutationCapability {
     private val closed = AtomicBoolean(false)
     private val openStreams = ConcurrentHashMap.newKeySet<Closeable>()
     override lateinit var root: RemoteEntry
@@ -147,7 +147,7 @@ internal class SmbStorageSession(
 
     // These flags declare implemented operations, not an ACL probe. Every operation checks server ACLs.
     override val capabilities = StorageCapabilities(upload = true, createDirectory = true,
-        rename = true, delete = true, rangeRead = true, resumableUpload = false, transportProtection = protection)
+        rename = true, delete = true, rangeRead = true, resumableUpload = true, transportProtection = protection)
 
     fun initialize() {
         root = statBlocking(paths.ref(paths.root))
@@ -312,10 +312,14 @@ internal class SmbStorageSession(
             guardParents(target).use {
                 val marker = openMarker(markerPath)
                 marker.first.use { receiptFile ->
-                    var receipt = if (marker.second) UploadReceipt(token, UploadReceipt.Phase.PREPARING,
-                        sourceVersionHash = sourceVersionHash).also { writeReceipt(receiptFile, it) }
+                    var receipt = if (marker.second) writeReceipt(receiptFile, UploadReceipt(token, UploadReceipt.Phase.PREPARING,
+                        sourceVersionHash = sourceVersionHash, sourceLength = expectedLength ?: -1))
                     else readReceipt(receiptFile, token)
                     if (receipt.sourceVersionHash != sourceVersionHash) sourceChanged()
+                    if (receipt.sourceLength >= 0 && receipt.sourceLength != expectedLength) sourceChanged()
+                    fun verify(file: SmbFile, saved: UploadReceipt) = verifyUpload(source, saved,
+                        revision(assertRegular(file)), { buffer, offset, start, count -> file.read(buffer, offset, start, count) },
+                        { writeReceipt(receiptFile, it) }, { context.ensureActive() })
 
                     val existing = maybeOpen(target, setOf(FILE_READ_DATA, FILE_READ_ATTRIBUTES))
                     if (existing != null) existing.use { file ->
@@ -327,61 +331,101 @@ internal class SmbStorageSession(
                             throw StorageException(StorageError.CONFLICT, "A file already exists with this name")
                         }
                         val info = assertRegular(file)
-                        if (file !is SmbFile || receipt.phase !in setOf(UploadReceipt.Phase.READY, UploadReceipt.Phase.COMMITTED) ||
+                        if (file !is SmbFile || receipt.phase !in setOf(UploadReceipt.Phase.READY, UploadReceipt.Phase.COMMITTED, UploadReceipt.Phase.RECONCILING) ||
                             receipt.fileId == 0L || receipt.fileId != info.internalInformation.indexNumber ||
                             receipt.length != info.standardInformation.endOfFile) outcomeUnknown()
-                        if (receipt.digest != hashRemote(file) { context.ensureActive() }) outcomeUnknown()
                         if (expectedLength != null && expectedLength != receipt.length) sourceChanged()
-                        if (receipt.digest != hashSource(source) { context.ensureActive() }) sourceChanged()
+                        if (receipt.phase != UploadReceipt.Phase.RECONCILING) {
+                            receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.RECONCILING,
+                                verificationOffset = 0, sourceHashState = "", remoteHashState = "", verificationRevision = ""))
+                        }
+                        try { receipt = verify(file, receipt).first }
+                        catch (error: StorageException) {
+                            if (error.error == StorageError.CORRUPT_DATA) outcomeUnknown()
+                            throw error
+                        }
                         verifySource()
                         // The file identity survives rename and the content digest proves the original
                         // payload is still present. Same name or same length alone is never sufficient.
+                        onProgress(receipt.length)
                         onCommit()
                         writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.COMMITTED))
-                        onProgress(receipt.length)
                         return@operation entry(target, info)
                     }
-                    if (receipt.phase == UploadReceipt.Phase.COMMITTED) outcomeUnknown()
-                    val oldPayload = maybeOpen(payloadPath, setOf(DELETE, FILE_READ_ATTRIBUTES))
-                    if (oldPayload != null) oldPayload.use { file ->
-                        val info = assertRegular(file)
-                        if (receipt.fileId == 0L || receipt.fileId != info.internalInformation.indexNumber) outcomeUnknown()
-                        // Restart an identified, uncommitted upload from zero. Never append blindly.
-                        file.deleteOnClose()
+                    if (receipt.phase in setOf(UploadReceipt.Phase.COMMITTED, UploadReceipt.Phase.RECONCILING)) outcomeUnknown()
+                    val payloadHandle = try {
+                        share.openFile(payloadPath, setOf(FILE_WRITE_DATA, FILE_READ_DATA, FILE_READ_ATTRIBUTES, DELETE),
+                            setOf(FILE_ATTRIBUTE_HIDDEN), emptySet(),
+                            if (receipt.phase == UploadReceipt.Phase.PREPARING) FILE_CREATE else FILE_OPEN, NO_FOLLOW)
+                    } catch (error: Exception) {
+                        // A missing identified payload can also mean an unacknowledged rename.
+                        // Retain the operation for reconciliation instead of inventing a new payload.
+                        if (receipt.phase != UploadReceipt.Phase.PREPARING && mapSmbError(error).error == StorageError.NOT_FOUND) outcomeUnknown()
+                        throw error
                     }
-
-                    share.openFile(payloadPath, setOf(FILE_WRITE_DATA, FILE_READ_DATA, FILE_READ_ATTRIBUTES, DELETE),
-                        setOf(FILE_ATTRIBUTE_HIDDEN), emptySet(), FILE_CREATE, NO_FOLLOW).use { payload ->
+                    payloadHandle.use { payload ->
                         val identity = assertRegular(payload).internalInformation.indexNumber
-                        receipt = receipt.copy(phase = UploadReceipt.Phase.WRITING, fileId = identity, length = 0, digest = "")
-                        writeReceipt(receiptFile, receipt)
-                        val digest = MessageDigest.getInstance("SHA-256")
-                        val buffer = ByteArray(BUFFER_SIZE)
-                        var copied = 0L
-                        source.open().use { input ->
-                            while (true) {
-                                context.ensureActive()
-                                val count = input.read(buffer)
-                                if (count < 0) break
-                                if (count == 0) continue
-                                if (expectedLength != null && copied + count > expectedLength) sourceChanged()
-                                val written = payload.write(buffer, copied, 0, count)
-                                if (written != count.toLong()) throw StorageException(StorageError.CORRUPT_DATA, "The server accepted an incomplete write")
-                                digest.update(buffer, 0, count)
-                                copied += count
-                                onProgress(copied)
-                            }
+                        if (identity == 0L) outcomeUnknown()
+                        if (receipt.phase == UploadReceipt.Phase.PREPARING) {
+                            receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.WRITING,
+                                fileId = identity, length = 0, digest = sha256(byteArrayOf())))
+                        } else if (receipt.fileId != identity || payload.length < receipt.length) outcomeUnknown()
+                        if (receipt.phase == UploadReceipt.Phase.READY) {
+                            receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.VERIFYING,
+                                verificationOffset = 0, sourceHashState = "", remoteHashState = "", verificationRevision = ""))
                         }
+                        var copied = receipt.length
+                        if (receipt.phase !in setOf(UploadReceipt.Phase.VERIFYING, UploadReceipt.Phase.READY)) {
+                            val verified = verify(payload, receipt)
+                            receipt = verified.first
+                            val digest = verified.second
+                            val buffer = ByteArray(BUFFER_SIZE)
+                            verifySource()
+                            // A write may have reached the server without its checkpoint. Discard only
+                            // that unconfirmed tail on this exclusively opened, identified payload.
+                            if (payload.length != copied) {
+                                payload.setLength(copied)
+                                payload.flush()
+                                if (payload.length != copied) throw StorageException(StorageError.CORRUPT_DATA,
+                                    "The server did not truncate the unconfirmed upload tail")
+                            }
+                            onProgress(copied)
+                            source.open(copied).use { input ->
+                                while (true) {
+                                    context.ensureActive()
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    if (count == 0) continue
+                                    if (expectedLength != null && copied + count > expectedLength) sourceChanged()
+                                    val written = payload.write(buffer, copied, 0, count)
+                                    if (written != count.toLong()) throw StorageException(StorageError.CORRUPT_DATA, "The server accepted an incomplete write")
+                                    digest.update(buffer, 0, count)
+                                    copied += count
+                                    if (copied - receipt.length >= UPLOAD_CHECKPOINT_BYTES) {
+                                        payload.flush()
+                                        receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.WRITING,
+                                            length = copied, digest = digest.snapshot(), verificationOffset = 0,
+                                            sourceHashState = "", remoteHashState = "", verificationRevision = ""))
+                                        onProgress(copied)
+                                    }
+                                }
+                            }
+                            verifySource()
+                            if (expectedLength != null && copied != expectedLength) sourceChanged()
+                            payload.flush()
+                            if (payload.length != copied) throw StorageException(StorageError.CORRUPT_DATA, "The uploaded file has an unexpected length")
+                            // Persist the complete payload before its potentially multi-slice verification.
+                            receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.VERIFYING,
+                                length = copied, digest = digest.snapshot(), verificationOffset = 0,
+                                sourceHashState = "", remoteHashState = "", verificationRevision = ""))
+                        }
+                        if (payload.length != receipt.length) throw StorageException(StorageError.CORRUPT_DATA,
+                            "The uploaded file has an unexpected length")
+                        if (expectedLength != null && receipt.length != expectedLength) sourceChanged()
+                        receipt = verify(payload, receipt).first
                         verifySource()
-                        if (expectedLength != null && copied != expectedLength) sourceChanged()
-                        payload.flush()
-                        if (payload.length != copied) throw StorageException(StorageError.CORRUPT_DATA, "The uploaded file has an unexpected length")
-                        val contentDigest = digest.digest().hex()
-                        // A source without an observable revision must be repeatable. Re-read it before
-                        // committing so a modified local source cannot silently produce a mixed upload.
-                        if (sourceVersion == null && hashSource(source) { context.ensureActive() } != contentDigest) sourceChanged()
-                        receipt = receipt.copy(phase = UploadReceipt.Phase.READY, length = copied, digest = contentDigest)
-                        writeReceipt(receiptFile, receipt)
+                        receipt = writeReceipt(receiptFile, receipt.copy(phase = UploadReceipt.Phase.READY))
+                        onProgress(copied)
                         verifySource()
                         onCommit()
                         try { payload.rename(target, false) } catch (error: Exception) {
@@ -402,6 +446,48 @@ internal class SmbStorageSession(
         }
     }
 
+    override suspend fun cleanupUpload(request: UploadRequest, completed: Boolean) = operation {
+        val target = paths.child(request.parent, request.name)
+        val token = SmbPaths.operationToken(request.operationId, config.id, target)
+        val markerPath = paths.internal(request.parent, token, "receipt")
+        val payloadPath = paths.internal(request.parent, token, "part")
+        guardParents(target).use {
+            val marker = try {
+                share.openFile(markerPath, setOf(FILE_READ_DATA, FILE_READ_ATTRIBUTES, DELETE),
+                    setOf(FILE_ATTRIBUTE_NORMAL), emptySet(), FILE_OPEN, NO_FOLLOW)
+            } catch (error: Exception) {
+                if (mapSmbError(error).error != StorageError.NOT_FOUND) throw error
+                // An absent receipt is idempotent only if no unidentifiable payload remains.
+                maybeOpen(payloadPath, setOf(FILE_READ_ATTRIBUTES))?.use { outcomeUnknown() }
+                return@operation
+            }
+            marker.use { receiptFile ->
+                assertRegular(receiptFile)
+                val receipt = readReceipt(receiptFile, token)
+                if (completed) {
+                    if (receipt.phase != UploadReceipt.Phase.COMMITTED) outcomeUnknown()
+                    maybeOpen(payloadPath, setOf(FILE_READ_ATTRIBUTES))?.use { outcomeUnknown() }
+                } else {
+                    if (receipt.phase == UploadReceipt.Phase.COMMITTED) outcomeUnknown()
+                    maybeOpen(target, setOf(FILE_READ_ATTRIBUTES))?.use { outcomeUnknown() }
+                    val payload = try {
+                        share.openFile(payloadPath, setOf(FILE_READ_ATTRIBUTES, DELETE),
+                            setOf(FILE_ATTRIBUTE_NORMAL), emptySet(), FILE_OPEN, NO_FOLLOW)
+                    } catch (error: Exception) {
+                        if (mapSmbError(error).error != StorageError.NOT_FOUND) throw error
+                        null
+                    }
+                    payload?.use {
+                        if (receipt.fileId == 0L || assertRegular(it).internalInformation.indexNumber != receipt.fileId) outcomeUnknown()
+                        it.deleteOnClose()
+                    }
+                }
+                // If deletion's reply is lost, retry handles an absent payload or receipt safely.
+                receiptFile.deleteOnClose()
+            }
+        }
+    }
+
     private fun openMarker(path: String): Pair<SmbFile, Boolean> {
         val access = setOf(FILE_READ_DATA, FILE_WRITE_DATA, FILE_READ_ATTRIBUTES, DELETE)
         try {
@@ -413,21 +499,27 @@ internal class SmbStorageSession(
     }
 
     private fun readReceipt(file: SmbFile, token: String): UploadReceipt {
-        if (file.length != UploadReceipt.MAX_BYTES.toLong()) outcomeUnknown()
-        val bytes = ByteArray(UploadReceipt.MAX_BYTES)
+        val length = file.length
+        if (length !in UploadReceipt.MAX_BYTES.toLong()..UploadReceipt.JOURNAL_BYTES.toLong()) outcomeUnknown()
+        val bytes = ByteArray(length.toInt())
         var position = 0
         while (position < bytes.size) {
             val count = file.read(bytes, position.toLong(), position, bytes.size - position)
             if (count <= 0) outcomeUnknown()
             position += count
         }
-        return UploadReceipt.decode(bytes, token)
+        return UploadReceipt.decodeJournal(bytes, token)
     }
 
-    private fun writeReceipt(file: SmbFile, receipt: UploadReceipt) {
-        val bytes = receipt.encode()
-        if (file.write(bytes, 0) != bytes.size.toLong()) outcomeUnknown()
+    private fun writeReceipt(file: SmbFile, receipt: UploadReceipt): UploadReceipt {
+        // The first record lives in slot zero. Migration from a v1 record writes slot one,
+        // leaving the original readable even if the process dies while extending the journal.
+        val next = if (file.length == 0L) receipt.copy(sequence = 0)
+            else receipt.copy(sequence = Math.addExact(receipt.sequence, 1))
+        val bytes = next.encode()
+        if (file.write(bytes, (next.sequence % 2) * UploadReceipt.MAX_BYTES) != bytes.size.toLong()) outcomeUnknown()
         file.flush()
+        return next
     }
 
     private fun maybeOpen(path: String, access: Set<AccessMask>): DiskEntry? = try {
@@ -526,33 +618,6 @@ private fun sourceChanged(): Nothing = throw StorageException(StorageError.SOURC
 
 private fun directoryNotEmpty(): Nothing = throw StorageException(StorageError.CONFLICT,
     "The directory contains files or unfinished recovery data and was retained")
-
-private fun hashRemote(file: SmbFile, check: () -> Unit): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    val buffer = ByteArray(BUFFER_SIZE)
-    val length = file.length
-    var position = 0L
-    while (position < length) {
-        check()
-        val count = file.read(buffer, position, 0, minOf(buffer.size.toLong(), length - position).toInt())
-        if (count <= 0) throw StorageException(StorageError.CORRUPT_DATA, "The remote read made no progress")
-        digest.update(buffer, 0, count)
-        position += count
-    }
-    return digest.digest().hex()
-}
-
-private fun hashSource(source: UploadSource, check: () -> Unit): String = source.open().use { input ->
-    val digest = MessageDigest.getInstance("SHA-256")
-    val buffer = ByteArray(BUFFER_SIZE)
-    while (true) {
-        check()
-        val count = input.read(buffer)
-        if (count < 0) break
-        if (count > 0) digest.update(buffer, 0, count)
-    }
-    digest.digest().hex()
-}
 
 private class SmbInputStream(
     private val file: SmbFile,

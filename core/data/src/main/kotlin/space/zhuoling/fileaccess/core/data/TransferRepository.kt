@@ -67,7 +67,7 @@ class TransferRepository(private val database: AppDatabase) {
         return dao.progress(lease.task.id, lease.owner, lease.generation, confirmedBytes, totalBytes, now) == 1
     }
 
-    /** Call only when the adapter has confirmed that a new nonresumable attempt starts at zero. */
+    /** Reset before applying the adapter's reconciled checkpoint, or a verified download restart. */
     suspend fun resetProgress(lease: TransferLease, now: Long = System.currentTimeMillis()): Boolean =
         dao.resetProgress(lease.task.id, lease.owner, lease.generation, now) == 1
 
@@ -117,6 +117,13 @@ class TransferRepository(private val database: AppDatabase) {
     suspend fun resume(id: String): Boolean = dao.resume(id, System.currentTimeMillis()) == 1
     suspend fun makeEligibleNow(id: String): Boolean = dao.makeEligibleNow(id) == 1
     suspend fun recoverExpired(now: Long = System.currentTimeMillis()): Int = dao.recoverExpired(now)
+
+    suspend fun uploadCleanupCandidates(now: Long = System.currentTimeMillis()): List<TransferTask> =
+        dao.uploadCleanupCandidates(now, now - 7L * 24 * 60 * 60 * 1000).map { it.model() }
+
+    suspend fun recordUploadCleanup(id: String, error: String?, now: Long = System.currentTimeMillis()) {
+        dao.recordUploadCleanup(id, if (error == null) Long.MAX_VALUE else now + 30 * 60_000L, error)
+    }
 
     private suspend fun interrupt(id: String, state: TransferState, error: String?): Boolean =
         database.withWriteTransaction {

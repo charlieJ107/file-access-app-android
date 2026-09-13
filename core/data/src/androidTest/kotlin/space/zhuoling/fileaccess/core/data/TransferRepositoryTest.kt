@@ -48,6 +48,39 @@ class TransferRepositoryTest {
         name = "photo.jpg", totalBytes = 20,
     )
 
+    @Test fun cancelledUploadCleanupRetriesDurablyAndKeepsOperationTombstone() = runBlocking {
+        val original = task()
+        val id = repository.enqueue(original)
+        assertTrue(repository.cancel(id))
+        val now = System.currentTimeMillis()
+        assertEquals(listOf(id), repository.uploadCleanupCandidates(now).map { it.id })
+        repository.recordUploadCleanup(id, "NAS unavailable", now)
+        assertTrue(repository.uploadCleanupCandidates(now + 1).isEmpty())
+        assertEquals("NAS unavailable", repository.get(id)?.error)
+        assertEquals(listOf(id), repository.uploadCleanupCandidates(now + 31 * 60_000L).map { it.id })
+        repository.recordUploadCleanup(id, null, now)
+        assertTrue(repository.uploadCleanupCandidates(now + 365L * 24 * 60 * 60_000).isEmpty())
+        assertFalse(repository.resume(id))
+        assertEquals(id, repository.enqueue(original.copy(id = "duplicate")))
+        assertEquals(TransferState.CANCELLED, repository.get(id)?.state)
+    }
+
+    @Test fun receiptRetentionSelectsOnlyOldSuccessAndNeverPausedOrFailedUploads() = runBlocking {
+        val now = System.currentTimeMillis()
+        val id = repository.enqueue(task())
+        val lease = requireNotNull(repository.claim(id, "test", now))
+        assertTrue(repository.transition(lease, TransferState.RUNNING, now = now + 1))
+        assertTrue(repository.transition(lease, TransferState.VERIFYING, now = now + 2))
+        assertTrue(repository.complete(lease, RemoteEntry(EntryRef("nas", "photos/photo.jpg"), "photo.jpg", false, size = 20), now + 3))
+        val paused = repository.enqueue(task())
+        assertTrue(repository.pause(paused))
+        assertTrue(repository.uploadCleanupCandidates(now + 6L * 24 * 60 * 60_000).isEmpty())
+        assertEquals(listOf(id), repository.uploadCleanupCandidates(now + 8L * 24 * 60 * 60_000).map { it.id })
+        repository.recordUploadCleanup(id, null, now + 8L * 24 * 60 * 60_000)
+        assertEquals(TransferState.SUCCEEDED, repository.get(id)?.state)
+        assertTrue(repository.uploadCleanupCandidates(now + 30L * 24 * 60 * 60_000).isEmpty())
+    }
+
     @Test fun simultaneousSchedulersHaveExactlyOneLeaseOwner() = runBlocking {
         val id = repository.enqueue(task())
         val leases = coroutineScope {
