@@ -15,12 +15,13 @@ import space.zhuoling.fileaccess.ui.FileAccessTheme
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private val updateModel: space.zhuoling.fileaccess.update.UpdateViewModel by viewModels()
     @Inject lateinit var previewRepository: PreviewRepository
     @Inject lateinit var remoteAccess: RemoteAccess
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { FileAccessTheme { FileAccessApp(viewModel, previewRepository, remoteAccess) } }
+        setContent { FileAccessTheme { FileAccessApp(viewModel, previewRepository, remoteAccess, updateModel) } }
     }
 }

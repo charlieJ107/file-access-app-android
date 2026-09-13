@@ -42,7 +42,10 @@ import space.zhuoling.fileaccess.preview.PreviewRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, remote: RemoteAccess) {
+fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, remote: RemoteAccess,
+    updateModel: space.zhuoling.fileaccess.update.UpdateViewModel) {
+    val updateState by updateModel.state.collectAsStateWithLifecycle()
+    UpdatePrompt(updateModel)
     val context = LocalContext.current
     val resources = LocalResources.current
     val stack = rememberNavBackStack(Spaces)
@@ -191,7 +194,11 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
                             }
                             entry<Transfers> { TransfersScreen(tasks, model::pauseTransfer, model::resumeTransfer, model::cancelTransfer) }
                             entry<Backups> { BackupScreen(rules, tasks, model::toggleRule, model::deleteRule, { requestNotifications(); model.backupNow() }, { navigate(Spaces) }) }
-                            entry<Settings> { SettingsScreen(settings.mediaThumbnailsUnmeteredOnly, model::setThumbnailNetworkPolicy, model::clearThumbnails) }
+                            entry<Settings> {
+                                SettingsScreen(settings.mediaThumbnailsUnmeteredOnly, model::setThumbnailNetworkPolicy, model::clearThumbnails) {
+                                    UpdateSettings(updateState, updateModel)
+                                }
+                            }
                         },
                     )
                 }
