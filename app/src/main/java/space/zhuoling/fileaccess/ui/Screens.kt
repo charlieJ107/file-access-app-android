@@ -396,10 +396,11 @@ private fun SettingToggle(label: String, checked: Boolean, onChange: (Boolean) -
 }
 
 @Composable
-fun SettingsScreen() = Page {
+fun SettingsScreen(updates: @Composable () -> Unit = {}) = Page {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PagePadding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("FileAccess", style = MaterialTheme.typography.headlineMedium) }
-        item { Text(stringResource(R.string.screen_app_version), style = MaterialTheme.typography.bodyMedium) }
+        item { Text("${space.zhuoling.fileaccess.BuildConfig.VERSION_NAME} · Android 15+", style = MaterialTheme.typography.bodyMedium) }
+        item { updates() }
         item { SettingsInfo(Icons.Default.Palette, stringResource(R.string.screen_appearance), stringResource(R.string.screen_appearance_detail)) }
         item { SettingsInfo(Icons.Default.Lock, stringResource(R.string.screen_privacy), stringResource(R.string.screen_privacy_detail)) }
         item { SettingsInfo(Icons.Default.CloudUpload, stringResource(R.string.screen_backup_policy), stringResource(R.string.screen_backup_intro)) }

@@ -1,5 +1,15 @@
 # 0.1.0 实现与验证记录
 
+## 2026-09-13：发布管理、自动更新与图标
+
+新增[分支与发布规范](branching-and-releases.md)及根目录 `AGENTS.md`：普通 PR 进入 staging，发布 PR 从 staging 合入 master；GitHub Actions 复用 CI 后签名构建，通过 GitHub CLI 发布。版本统一读取 `version.properties`。
+
+App 自动/手动检查 GitHub 稳定 Release，按 SemVer 2.0 比较版本；下载、取消、SHA-256/包名/版本/最低 SDK/签名校验、安装来源授权与系统安装入口已实现。前台自动检查最多每天一次，不提供后台静默安装。正式更新源需由维护者公开当前仓库并配置长期签名 Secrets。新增[原创 Logo 与启动图标资产](brand/README.md)。
+
+本轮验证：Debug/Release 构建与 Lint 通过；8 项更新单元测试和 6 项发布规则测试通过；actionlint 1.7.12 验证两个 Workflow 通过；Android 16 模拟器上 3 项更新 APK / FileProvider 测试与原有 4 项 Compose UI 测试通过，并检查设置页布局。APK 测试使用同一 debug 签名的 0.1.0 已安装版本与 0.2.0 测试制品，验证新版本通过以及损坏/同版本/元数据不符的拒绝行为。测试制品不发布。
+
+本轮未执行 GitHub 远端发布、正式证书的端到端覆盖安装或真机/OEM 安装权限矩阵；本机 release 构建未配置正式签名。公开仓库、配置签名后按发布文档完成正式发布验收。以下内容是 2026-09-12 的历史实现与测试记录。
+
 2026-09-12。用户批准设计后启动实现，并进一步确认首版只需 SMB，手机为 Android 16。本版交付可安装的开发预览；完整设计中的双向同步、其他协议、E2EE、性能和故障矩阵验收仍在后续阶段。
 
 ## 已实现
