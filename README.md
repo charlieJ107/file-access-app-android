@@ -38,4 +38,4 @@ GitHub 仓库：[charlieJ107/file-access-app-android](https://github.com/charlie
 - 相机照片/视频及用户授权目录的增量备份；按 Wi-Fi、计费网络、充电条件执行；本机删除不删除 NAS 副本。
 - SMB 签名默认开启；可要求 SMB3 加密；不支持 SMB1 和匿名回退。
 
-当前上传中断后可能从头重传；自动备份的单文件上限为 256 MiB，更大或大小未知的文件需在应用内点击“立即备份”。[实现与验证记录](docs/implementation-status.md) 列出了准确边界、测试证据和下一步。
+SMB 上传支持持久化断点、恢复校验和非覆盖提交，自动备份不再限制为 256 MiB。取消任务的临时文件和过期回执可安全清理；[断点上传说明](docs/smb-resumable-upload.md)列出了恢复语义、测试证据和待验证边界。

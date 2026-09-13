@@ -34,6 +34,17 @@ abstract class TransferDao {
         AND leaseOwner IS NULL AND retryAt <= :now ORDER BY createdAt LIMIT :limit""")
     abstract suspend fun runnableIds(now: Long, limit: Int): List<String>
 
+    // For terminal uploads only, retryAt is the cleanup retry time; MAX_VALUE means retired.
+    // Keep the task/unique operationId forever so retired receipts cannot enable duplicate uploads.
+    @Query("""SELECT * FROM transfer_tasks WHERE direction = 'UPLOAD' AND leaseOwner IS NULL
+        AND retryAt <= :now AND (state = 'CANCELLED' OR (state = 'SUCCEEDED' AND updatedAt <= :retainAfter))
+        ORDER BY retryAt, updatedAt LIMIT 20""")
+    abstract suspend fun uploadCleanupCandidates(now: Long, retainAfter: Long): List<TransferTaskEntity>
+
+    @Query("""UPDATE transfer_tasks SET retryAt = :retryAt, error = :error
+        WHERE id = :id AND state IN ('CANCELLED','SUCCEEDED') AND leaseOwner IS NULL""")
+    abstract suspend fun recordUploadCleanup(id: String, retryAt: Long, error: String?): Int
+
     @Query("""UPDATE transfer_tasks SET leaseOwner = :owner, leaseGeneration = leaseGeneration + 1,
         leaseExpiresAt = :expiresAt, updatedAt = :now,
         state = CASE WHEN state = 'RECONCILING' THEN 'RECONCILING' ELSE 'PREPARING' END, error = NULL
@@ -93,6 +104,7 @@ abstract class TransferDao {
     ): Int
 
     @Query("""UPDATE transfer_tasks SET state = :target, error = :error, updatedAt = :now,
+        retryAt = CASE WHEN :target = 'CANCELLED' THEN 0 ELSE retryAt END,
         leaseOwner = NULL, leaseExpiresAt = 0, leaseGeneration = leaseGeneration + 1
         WHERE id = :id AND state NOT IN ('SUCCEEDED','CANCELLED','COMMITTING','RECONCILING')""")
     abstract suspend fun interrupt(id: String, target: String, error: String?, now: Long): Int
@@ -133,7 +145,7 @@ abstract class TransferDao {
     abstract suspend fun invalidateConnection(connectionId: String, revision: Long, now: Long)
 
     @Query("""UPDATE transfer_tasks SET state = 'CANCELLED', error = 'Backup rule removed or changed',
-        leaseOwner = NULL, leaseExpiresAt = 0, leaseGeneration = leaseGeneration + 1, updatedAt = :now
+        leaseOwner = NULL, leaseExpiresAt = 0, leaseGeneration = leaseGeneration + 1, updatedAt = :now, retryAt = 0
         WHERE backupRuleId = :ruleId AND state NOT IN ('SUCCEEDED','CANCELLED','COMMITTING','RECONCILING')""")
     abstract suspend fun cancelRule(ruleId: String, now: Long)
 
