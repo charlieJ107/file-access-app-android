@@ -45,9 +45,11 @@ versionName=0.2.0
 
 ## 首次发布配置
 
-1. 由仓库维护者在发布前将当前仓库 `charlieJ107/file-access-app-android` 设为公开。App 匿名读取 Release API；不内置 GitHub Token。工作流会在私有仓库上明确失败。
-2. 创建 GitHub Environment `release`，建议将 deployment branches 限制为 `release`；可按团队需要配置 required reviewers。
-3. 按 [签名密钥管理与轮换](signing-and-rotation.md) 初始化正式签名。维护者已选择正式私钥只保存在 GitHub Secrets，不保留本地正式密钥备份；本地开发使用开发证书。
+2026-09-13：公开更新源和正式签名已配置，维护者已授权推进[首次发布 PR #6](https://github.com/charlieJ107/file-access-app-android/pull/6)。正式发布须通过 PR 检查、合并及发布 CI；发布结果以 [GitHub Releases](https://github.com/charlieJ107/file-access-app-android/releases) 实际公布的版本与资产为准。
+
+1. 当前仓库 `charlieJ107/file-access-app-android` 已公开，App 可匿名读取 Release API，不内置 GitHub Token。后续应保持更新源公开；工作流仍会拒绝在私有仓库发布。
+2. GitHub Environment `release` 已创建，deployment branches 已限制为 `release`；可按团队需要配置 required reviewers。
+3. 正式签名已按 [签名密钥管理与轮换](signing-and-rotation.md) 初始化，无需重复初始化。维护者已选择正式私钥只保存在 GitHub Secrets，不保留本地正式密钥备份；本地开发使用开发证书。
 
 | Secret | 内容 |
 | --- | --- |
@@ -56,7 +58,7 @@ versionName=0.2.0
 
 签名文件仅在受控临时目录中解码，结束和失败时清理；不要上传为构建 artifact。正式版本可以通过 Android 原生 proof-of-rotation 向前轮换密钥，必须携带已验证的授权链，不能只替换 Secret 后用无关联密钥发布。公开 lineage 可以保存到版本管理和 artifact；它不包含私钥。原有 debug 安装使用不同证书，无法直接覆盖为正式版；不要通过卸载来“修复”签名错误而丢失用户数据，应提前安排首次正式版安装与数据处理。
 
-GitHub Actions 的 `GITHUB_TOKEN` 仅在发布 job 获得 `contents: write`；PR 检查不使用正式签名 Secrets。普通发布不自动创建或轮换密钥，缺失配置会失败；维护 workflow 只创建或检查公开轮换证明，不读取管理员 Token、不直接修改 Secrets。公开仓库或正式签名配置未就绪时，保留发布草稿，不合并发布 PR。
+GitHub Actions 的 `GITHUB_TOKEN` 仅在发布 job 获得 `contents: write`；PR 检查不使用正式签名 Secrets。普通发布不自动创建或轮换密钥，缺失配置会失败；维护 workflow 只创建或检查公开轮换证明，不读取管理员 Token、不直接修改 Secrets。每次发布仍须核对公开可见性和签名配置；任一前置条件失效时保留发布草稿，修复后再推进。
 
 ## 日常开发与发布 CLI
 

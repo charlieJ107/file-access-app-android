@@ -12,13 +12,15 @@
 
 ## 仓库与许可
 
-GitHub 仓库：[charlieJ107/file-access-app-android](https://github.com/charlieJ107/file-access-app-android)，可见性为 **Private**。
+GitHub 公开仓库：[charlieJ107/file-access-app-android](https://github.com/charlieJ107/file-access-app-android)。欢迎阅读源码、提交问题和参与开发。
 
-本项目自行编写的代码采用 [Mozilla Public License 2.0](LICENSE)。使用开源许可证不会更改 GitHub 仓库的私有可见性或访问设置。第三方组件保留各自许可，见 [NOTICE.md](NOTICE.md)。MPL 官方文本与说明见 [Mozilla](https://www.mozilla.org/en-US/MPL/2.0/)。
+本项目自行编写的代码采用 [Mozilla Public License 2.0](LICENSE)。第三方组件保留各自许可，见 [NOTICE.md](NOTICE.md)。MPL 官方文本与说明见 [Mozilla](https://www.mozilla.org/en-US/MPL/2.0/)。
 
 开发协作见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全报告见 [SECURITY.md](SECURITY.md)。
 
-[Android CI](https://github.com/charlieJ107/file-access-app-android/actions/workflows/android-ci.yml) 在 `master` 推送和 PR 时执行 Debug 构建、JVM 单元测试及 Lint，测试报告保留 7 天。`master` 用于日常集成；`master → release` 发布 PR 合并后，[Release 工作流](.github/workflows/release.yml) 复用上述检查，再签名构建、校验并创建 GitHub Release。首次发布前由维护者公开仓库并配置签名 Secrets；详见[分支与发布规范](docs/branching-and-releases.md)。真实 SMB 网络测试和 Android 设备测试需要单独准备隔离环境，不计入默认 CI 的通过范围。
+[Android CI](https://github.com/charlieJ107/file-access-app-android/actions/workflows/android-ci.yml) 在 `master` 推送和 PR 时执行 Debug 构建、JVM 单元测试及 Lint，测试报告保留 7 天。`master` 用于日常集成；`master → release` 发布 PR 合并后，[Release 工作流](.github/workflows/release.yml) 复用上述检查，再签名构建、校验并创建 GitHub Release。公开更新源和正式签名 Secrets 已配置；发布流程见[分支与发布规范](docs/branching-and-releases.md)。真实 SMB 网络测试和 Android 设备测试需要单独准备隔离环境，不计入默认 CI 的通过范围。
+
+正式安装包下载入口：[GitHub Releases](https://github.com/charlieJ107/file-access-app-android/releases)。发布 CI 成功后，版本页面会提供 `fileaccess-<versionCode>.apk` 和校验文件 `SHA256SUMS`；可下载版本以该页面实际公布的资产为准。
 
 ## 运行
 

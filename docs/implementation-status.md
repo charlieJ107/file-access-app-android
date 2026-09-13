@@ -1,22 +1,28 @@
 # 0.1.0 实现与验证记录
 
+## 2026-09-13：公开仓库与首次发布准备
+
+仓库 `charlieJ107/file-access-app-android` 已公开，App 可匿名访问当前仓库的 Release API。正式签名已配置在 GitHub Environment `release` 的原子 `RELEASE_SIGNING_BUNDLE` 中，仅允许 `release` 分支使用。
+
+维护者已授权推进[首次发布 PR #6](https://github.com/charlieJ107/file-access-app-android/pull/6)。本节记录合并发布 PR 前的准备状态，不代表发布成功；实际合并、CI 及产物验收结果见该 PR。正式 APK 与 `SHA256SUMS` 由 CI 公布在 [GitHub Releases](https://github.com/charlieJ107/file-access-app-android/releases)，以该页面实际资产为准。以下保留各轮实现与验证时的记录。
+
 ## 2026-09-13：Android 原生签名轮换
 
 更新器支持 Android 验证的向前 signing lineage，接受同签名与合法后继，拒绝旧密钥回退、只有共同祖先的分叉和无关证书。正式发布从无 Secrets 的 Gradle unsigned 构建改为独立签名步骤，并对上一正式 APK 验证历史连续性。维护者选择正式私钥仅存 GitHub Environment `release` 的原子签名 bundle，本地开发使用开发证书；管理工具提供排他初始化、受控轮换、公开状态检查与失败恢复。详见[签名密钥管理](signing-and-rotation.md)。
 
 本地 Debug/unsigned Release 构建、App JVM 测试和 Debug/Release Lint 通过。Android 16 模拟器通过 8 项原生轮换/数据保留检查，以及 6 项 App 签名轮换和 2 项更新验证测试，均无失败或跳过；本轮未运行需要同包更高版本 fixture 的额外接受用例。生产签名 CLI 的 13 项真实 APK 检查、维护流程的 8 项准备/检查与错误绑定验证通过，使用一次性测试密钥。此处设备结果不代表正式签名版本已发布或完成实机覆盖升级。
 
-正式密钥首次初始化已完成：GitHub Environment `release` 仅配置原子 `RELEASE_SIGNING_BUNDLE`，deployment branch 限制为 `release`；本地临时私钥和维护锁均已清理。仓库当前仍为私有，首次发布 PR 保持草稿，未运行正式发布；公开指纹记录在签名文档中。
+正式密钥首次初始化已完成：GitHub Environment `release` 仅配置原子 `RELEASE_SIGNING_BUNDLE`，deployment branch 限制为 `release`；本地临时私钥和维护锁均已清理。初始化时仓库尚未公开，首次发布 PR 当时保持草稿，未运行正式发布；公开指纹记录在签名文档中。当前发布准备状态见上文。
 
 ## 2026-09-13：发布管理、自动更新与图标
 
 新增[分支与发布规范](branching-and-releases.md)及根目录 `AGENTS.md`。最初采用 staging 汇总、master 发布，现按客户端项目的开发方式调整为普通 PR 合入 master、发布 PR 从 master 合入 release，不再保留长期 staging。GitHub Actions 复用 CI 后签名构建，通过 GitHub CLI 发布。版本统一读取 `version.properties`。
 
-App 自动/手动检查 GitHub 稳定 Release，按 SemVer 2.0 比较版本；下载、取消、SHA-256/包名/版本/最低 SDK/签名校验、安装来源授权与系统安装入口已实现。前台自动检查最多每天一次，不提供后台静默安装。正式更新源需由维护者公开当前仓库并配置长期签名 Secrets。新增[原创 Logo 与启动图标资产](brand/README.md)。
+App 自动/手动检查 GitHub 稳定 Release，按 SemVer 2.0 比较版本；下载、取消、SHA-256/包名/版本/最低 SDK/签名校验、安装来源授权与系统安装入口已实现。前台自动检查最多每天一次，不提供后台静默安装。该轮实现时公开更新源和正式签名尚待配置，现已完成，见上文。新增[原创 Logo 与启动图标资产](brand/README.md)。
 
 本轮验证：Debug/Release 构建与 Lint 通过；8 项更新单元测试和 6 项发布规则测试通过；actionlint 1.7.12 验证两个 Workflow 通过；Android 16 模拟器上 3 项更新 APK / FileProvider 测试与原有 4 项 Compose UI 测试通过，并检查设置页布局。APK 测试使用同一 debug 签名的 0.1.0 已安装版本与 0.2.0 测试制品，验证新版本通过以及损坏/同版本/元数据不符的拒绝行为。测试制品不发布。
 
-本轮未执行 GitHub 远端发布、正式证书的端到端覆盖安装或真机/OEM 安装权限矩阵；本机 release 构建未配置正式签名。公开仓库、配置签名后按发布文档完成正式发布验收。以下内容是 2026-09-12 的历史实现与测试记录。
+该轮未执行 GitHub 远端发布、正式证书的端到端覆盖安装或真机/OEM 安装权限矩阵；本机 Release 构建使用 unsigned APK。首次正式发布及产物验收按发布文档推进，不以本地开发测试代替。以下内容是 2026-09-12 的历史实现与测试记录。
 
 2026-09-12。用户批准设计后启动实现，并进一步确认首版只需 SMB，手机为 Android 16。本版交付可安装的开发预览；完整设计中的双向同步、其他协议、E2EE、性能和故障矩阵验收仍在后续阶段。
 
@@ -58,7 +64,7 @@ App 自动/手动检查 GitHub 稳定 Release，按 SemVer 2.0 比较版本；�
 - Settings 当前展示隐私、主题和版本说明；主题跟随系统动态颜色。DataStore 设置基础已建立，但尚未开放全部偏好开关。
 - WebDAV、S3、私有 API、E2EE 均未启用。私有 API 按用户已有方案接入，不自行定义或发布另一套加密格式。新协议复用操作能力接口；协议配置/认证表单目前只实现 SMB，接入 OAuth、签名密钥、多阶段认证时还需补充对应配置描述与凭据类型。
 - 最低 Android15，compile/target37；本次实测 Android16。Android17 局域网运行时权限已声明并按需请求，但尚未做 API37 设备测试。SMB3 实际加密互操作、真实 NAS 和物理手机测试仍待完成。
-- Release 变体能构建但未配置发布签名和收缩；当前 APK 用开发签名。没有广告、收费组件、分析遥测或远端账户注册要求。
+- 2026-09-12 的本机 Release 变体能构建，当时未配置发布签名和收缩，当轮 APK 使用开发签名；当前正式签名配置见上文。没有广告、收费组件、分析遥测或远端账户注册要求。
 
 ## 验证记录
 

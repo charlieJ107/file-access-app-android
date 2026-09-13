@@ -31,7 +31,7 @@ python scripts/manage-signing-key.py initialize `
 
 工具在生成前检查现有 Secret，拒绝覆盖 ACTIVE、遗留的旧签名 Secrets 或待处理 NEXT。它生成 RSA 3072 / SHA256withRSA、约 30 年有效期的自签名证书，使用随机强密码，通过标准输入交给 `gh secret set`。输出只含公开证书 SHA-256 和操作状态。源码、命令参数、日志、APK 和 artifact 均不包含私钥或密码。
 
-初始化只配置签名，不创建 GitHub Release，也不改变仓库可见性。首次发布仍要维护者公开当前更新源仓库并通过 `master → release` 发布 PR。维护 workflow 随该代码进入 `release` 后才能运行；初始化本身不依赖维护 workflow。
+初始化只配置签名，不创建 GitHub Release，也不改变仓库可见性。当前更新源仓库已公开，正式签名已配置；首次发布通过 `master → release` 发布 PR 和 CI 执行。维护 workflow 随该代码进入 `release` 后才能运行；初始化本身不依赖维护 workflow。
 
 本仓库已于 2026-09-13 完成首次初始化：Environment `release` 仅允许 `release` 分支，正式密钥已存入 `RELEASE_SIGNING_BUNDLE`，本地临时 keystore 和远端维护锁已清理。初始证书的公开 SHA-256 指纹为 `5920c6f3e3c008493457294b8bef9805fb63c5721666d1ad4568acf728a30db3`。这条历史记录不代替后续轮换时的状态检查，也不表示已经发布正式 APK。
 
