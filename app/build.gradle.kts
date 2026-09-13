@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,10 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
+val appVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
+val releaseRepository = providers.gradleProperty("releaseRepository").getOrElse("charlieJ107/file-access-app-android")
+require(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(releaseRepository))
+
 android {
     namespace = "space.zhuoling.fileaccess"
     compileSdk { version = release(37) }
@@ -12,13 +18,25 @@ android {
         applicationId = "space.zhuoling.fileaccess"
         minSdk = 35
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersion.getProperty("versionCode").toInt().also { require(it in 1..2_100_000_000) }
+        versionName = appVersion.getProperty("versionName").also { require(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)").matches(it)) }
+        buildConfigField("String", "RELEASE_REPOSITORY", "\"$releaseRepository\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
+    signingConfigs {
+        if (providers.environmentVariable("RELEASE_STORE_FILE").isPresent) {
+            create("githubRelease") {
+                storeFile = file(providers.environmentVariable("RELEASE_STORE_FILE").get())
+                storePassword = providers.environmentVariable("RELEASE_STORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").get()
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("githubRelease")
             optimization { enable = false }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

@@ -83,6 +83,7 @@ class TransferScheduler @Inject constructor(
     suspend fun cancel(id: String) {
         if (tasks.cancel(id)) {
             engine.stop(id)
+            scheduleBackupScan()
             // Only discard this app's private staging data; the chosen destination may exist.
             runCatching { UUID.fromString(id) }.getOrNull()?.let {
                 java.io.File(context.noBackupFilesDir, "transfers/$id.part").delete()

@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -54,6 +55,9 @@ jobs:
           fi
           test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
           test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
+
+      - name: Test release validation rules
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Build debug APK, run unit tests and lint
         # Wire-protocol SMB tests explicitly skip without FILEACCESS_SMB_TEST_PYTHON.
