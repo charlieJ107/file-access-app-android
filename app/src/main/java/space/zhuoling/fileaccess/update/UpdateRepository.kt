@@ -95,9 +95,11 @@ class UpdateRepository @Inject constructor(@ApplicationContext private val conte
         require(archive.packageName == context.packageName && archive.longVersionCode == release.versionCode &&
             archive.longVersionCode > installed.longVersionCode && archive.versionName == release.versionName) { "APK 包名或版本与发布信息不符" }
         require((archive.applicationInfo?.minSdkVersion ?: Int.MAX_VALUE) <= Build.VERSION.SDK_INT) { "新版本不支持当前 Android 系统" }
-        val expected = installed.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet().orEmpty()
-        val actual = archive.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet().orEmpty()
-        require(expected.isNotEmpty() && actual == expected) { "安装包签名不同，无法覆盖升级；请使用与当前应用相同签名的正式版本" }
+        // GET_SIGNING_CERTIFICATES verifies the APK and its native proof-of-rotation.
+        // Trust only a successor authorized by the currently installed key, not any old key.
+        require(permitsSigningUpdate(installed.signingInfo.verifiedSigningIdentity(), archive.signingInfo.verifiedSigningIdentity())) {
+            "安装包签名不受当前版本信任；需要相同签名或由当前签名授权的向前轮换，不能退回旧签名"
+        }
     }
 
     private fun open(url: String, api: Boolean = false): HttpURLConnection {

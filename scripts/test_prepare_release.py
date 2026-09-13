@@ -27,7 +27,8 @@ class ReleaseGateTest(unittest.TestCase):
         return output.getvalue()
 
     def previous(self, tag="v1.9.0", code=11, draft=False):
-        return {"tag_name": tag, "draft": draft, "prerelease": False, "target_commitish": "abc", "assets": [{"name": f"fileaccess-{code}.apk"}]}
+        return {"tag_name": tag, "draft": draft, "prerelease": False, "target_commitish": "abc",
+                "assets": [{"name": f"fileaccess-{code}.apk", "digest": "sha256:" + "a" * 64, "size": 1024}]}
 
     def test_first_release_and_numeric_semver_increase(self):
         self.assertIn("tag=v1.10.0", self.run_gate())
@@ -58,6 +59,22 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertIn("exists=true", self.run_gate([draft]))
         for target in ["different", "master", None]:
             with self.assertRaises(ValueError): self.run_gate([{**draft, "target_commitish": target}])
+
+    def test_previous_signer_baseline_uses_highest_stable_semver(self):
+        releases = [self.previous(tag="v1.8.0", code=9), self.previous(), self.previous(tag="v1.10.0", draft=True)]
+        output = self.run_gate(releases)
+        self.assertIn("previous_tag=v1.9.0\n", output)
+        self.assertIn("previous_asset=fileaccess-11.apk\n", output)
+        self.assertIn("previous_sha256=" + "a" * 64 + "\n", output)
+        self.assertIn("previous_tag=\n", self.run_gate())
+
+    def test_missing_or_ambiguous_previous_apk_cannot_skip_continuity(self):
+        prior = self.previous()
+        asset = prior["assets"][0]
+        for assets in [[], [asset, {**asset, "name": "another.apk"}], [{**asset, "digest": None}],
+                       [{**asset, "size": 0}], [{**asset, "size": 257 * 1024 * 1024}]]:
+            with self.subTest(assets=assets), self.assertRaises(ValueError):
+                self.run_gate([{**prior, "assets": assets}])
 
 
 if __name__ == "__main__":

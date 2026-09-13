@@ -1,5 +1,13 @@
 # 0.1.0 实现与验证记录
 
+## 2026-09-13：Android 原生签名轮换
+
+更新器支持 Android 验证的向前 signing lineage，接受同签名与合法后继，拒绝旧密钥回退、只有共同祖先的分叉和无关证书。正式发布从无 Secrets 的 Gradle unsigned 构建改为独立签名步骤，并对上一正式 APK 验证历史连续性。维护者选择正式私钥仅存 GitHub Environment `release` 的原子签名 bundle，本地开发使用开发证书；管理工具提供排他初始化、受控轮换、公开状态检查与失败恢复。详见[签名密钥管理](signing-and-rotation.md)。
+
+本地 Debug/unsigned Release 构建、App JVM 测试和 Debug/Release Lint 通过。Android 16 模拟器通过 8 项原生轮换/数据保留检查，以及 6 项 App 签名轮换和 2 项更新验证测试，均无失败或跳过；本轮未运行需要同包更高版本 fixture 的额外接受用例。生产签名 CLI 的 13 项真实 APK 检查、维护流程的 8 项准备/检查与错误绑定验证通过，使用一次性测试密钥。此处设备结果不代表正式签名版本已发布或完成实机覆盖升级。
+
+正式密钥首次初始化已完成：GitHub Environment `release` 仅配置原子 `RELEASE_SIGNING_BUNDLE`，deployment branch 限制为 `release`；本地临时私钥和维护锁均已清理。仓库当前仍为私有，首次发布 PR 保持草稿，未运行正式发布；公开指纹记录在签名文档中。
+
 ## 2026-09-13：发布管理、自动更新与图标
 
 新增[分支与发布规范](branching-and-releases.md)及根目录 `AGENTS.md`。最初采用 staging 汇总、master 发布，现按客户端项目的开发方式调整为普通 PR 合入 master、发布 PR 从 master 合入 release，不再保留长期 staging。GitHub Actions 复用 CI 后签名构建，通过 GitHub CLI 发布。版本统一读取 `version.properties`。

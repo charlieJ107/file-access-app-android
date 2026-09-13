@@ -9,6 +9,8 @@
 - 使用 `gh workflow run` / `gh run watch` 操作 CI；正式构建和 GitHub Release 由 `.github/workflows/release.yml` 在 `release` 上执行。`master` 推送只运行普通 CI。本机 APK 只用于验证，不作为正式发布制品。
 - 迁移旧分支时先确保全部提交通过 PR 保存在 `master`，再关闭或调整仍引用旧分支的 PR，最后删除已被完整合并的 `staging`。首次建立 `release` 时遵循发布文档的初始化流程，避免创建分支即意外发布。
 - 修改更新协议时同步检查 App、发布脚本、资产命名、SHA-256、签名校验和文档；保留稳定版过滤、HTTPS 与下载边界。
+- 正式签名与轮换遵循 [签名密钥管理](docs/signing-and-rotation.md)。正式私钥只保存在 GitHub Environment `release` 的原子 `RELEASE_SIGNING_BUNDLE` Secret，本地开发使用开发证书；不得在本地保留正式 keystore、密码文件或备份。密钥初始化和轮换仅在明确授权时执行，禁止覆盖已有初始化密钥，维护操作必须持有仓库签名锁。
+- 单签名更新允许 Android 验证过的向前轮换链，不能仅比较当前证书或历史交集；多签名保持完整集合匹配。正式 CI 保留完整公开 lineage、覆盖升级能力及对旧密钥回退的拒绝。发布、初始化和轮换是独立操作，生成密钥不代表授权发布版本。
 - 不在 APK、源码或日志中放入 GitHub Token、签名私钥或真实 NAS 凭据。签名只读取环境变量和 GitHub Secrets。
 - 运行与修改相称的构建、测试和 Lint，报告实际执行结果；CI 尚未运行、缺少签名、未连接设备等情况要准确说明，不能写成已发布或已验证。
 
