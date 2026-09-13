@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -55,6 +56,13 @@ jobs:
           test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
           test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
 
+      - name: Test release validation rules
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Verify native APK signing and rotation rules
+        # Disposable test keys only; PR jobs never receive production signing secrets.
+        run: python3 scripts/test-signing-rotation.py --test-release-signer --test-rotation-preparation --output "$RUNNER_TEMP/signing-rotation-checks"
+
       - name: Build debug APK, run unit tests and lint
         # Wire-protocol SMB tests explicitly skip without FILEACCESS_SMB_TEST_PYTHON.
         # Device/Keystore/media tests require the separate Android 16 test setup.
@@ -77,3 +85,4 @@ jobs:
             **/build/reports/tests/**
             **/build/reports/dependency-verification/**
             app/build/reports/lint-results-debug.*
+            ${{ runner.temp }}/signing-rotation-checks/report.json

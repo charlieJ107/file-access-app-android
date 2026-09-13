@@ -1,10 +1,10 @@
 # 参与开发
 
-本仓库为私有仓库，仅获授权的协作者可以访问。代码采用 [MPL-2.0](LICENSE)；仓库可见性与代码许可分别管理，添加许可证不会将仓库设为公开。提交内容应有权以仓库许可证提供；引入第三方代码时保留其许可与署名，并说明来源。
+本仓库已公开，欢迎通过 issue 和 Pull Request 参与开发。代码采用 [MPL-2.0](LICENSE)；提交内容应有权以仓库许可证提供。引入第三方代码时保留其许可与署名，并说明来源。
 
 ## 开发约定
 
-先阅读 [开发说明](docs/development.md)、[设计入口](docs/design/README.md) 和 [当前实现边界](docs/implementation-status.md)。首阶段聚焦 SMB 和 Android 16；其他协议通过 `core:storage-api` 的能力接口接入。
+先阅读 [分支与发布规范](docs/branching-and-releases.md)、[开发说明](docs/development.md)、[设计入口](docs/design/README.md) 和 [当前实现边界](docs/implementation-status.md)。普通 PR 合入 `master`，正式发布通过 `master → release` PR 触发 GitHub Actions，不使用长期 `staging` 分支。首阶段聚焦 SMB 和 Android 16；其他协议通过 `core:storage-api` 的能力接口接入。
 
 - 使用 Kotlin、Compose、ViewModel / Flow 和现有依赖注入方式；让 UI 状态、持久化、传输调度和协议实现保持模块边界。
 - 在协议层处理远端路径、版本核对和资源释放，不把 SMBJ 类型、密码或网络会话传入 UI。

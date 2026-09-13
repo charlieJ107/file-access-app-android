@@ -36,14 +36,14 @@ import space.zhuoling.fileaccess.core.model.*
 private val PagePadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp)
 
 @Composable
-private fun Page(content: @Composable BoxScope.() -> Unit) {
+internal fun Page(content: @Composable BoxScope.() -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Box(Modifier.widthIn(max = 1100.dp).fillMaxSize(), content = content)
     }
 }
 
 @Composable
-private fun EmptyState(icon: ImageVector, title: String, detail: String, action: @Composable (() -> Unit)? = null) {
+internal fun EmptyState(icon: ImageVector, title: String, detail: String, action: @Composable (() -> Unit)? = null) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.secondaryContainer) {
@@ -160,114 +160,7 @@ private fun FormField(value: String, onChange: (String) -> Unit, label: Int, mod
 }
 
 @Composable
-fun BrowserScreen(state: BrowserState, busy: Boolean, onOpen: (RemoteEntry) -> Unit, onUpload: () -> Unit,
-    onCreateDirectory: (String) -> Unit, onRename: (RemoteEntry, String) -> Unit, onDelete: (List<RemoteEntry>) -> Unit,
-    onDownload: (RemoteEntry) -> Unit, onBackup: () -> Unit, onRetry: () -> Unit) = Page {
-    var query by rememberSaveable(state.directory?.ref) { mutableStateOf("") }
-    var sort by rememberSaveable { mutableIntStateOf(0) }
-    var sortMenu by remember { mutableStateOf(false) }
-    var selection by remember(state.directory?.ref) { mutableStateOf(setOf<EntryRef>()) }
-    var newFolder by remember { mutableStateOf(false) }
-    var rename by remember { mutableStateOf<RemoteEntry?>(null) }
-    var deleting by remember { mutableStateOf<List<RemoteEntry>?>(null) }
-    val entries = remember(state.entries, query, sort) {
-        val filtered = state.entries.filter { it.name.contains(query, ignoreCase = true) }
-        val order = when (sort) {
-            1 -> compareByDescending<RemoteEntry> { it.modifiedAtEpochMillis ?: Long.MIN_VALUE }
-            2 -> compareByDescending<RemoteEntry> { it.size ?: -1 }
-            else -> compareBy { it.name.lowercase(Locale.ROOT) }
-        }
-        filtered.sortedWith(compareByDescending<RemoteEntry> { it.isDirectory }.then(order).thenBy { it.name })
-    }
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(state.directory?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.screen_share_root),
-                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(query, { query = it }, Modifier.weight(1f), singleLine = true,
-                    label = { Text(stringResource(R.string.screen_search_folder)) }, leadingIcon = { Icon(Icons.Default.Search, null) })
-                Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, stringResource(R.string.screen_sort)) }
-                    DropdownMenu(sortMenu, { sortMenu = false }) {
-                        listOf(R.string.screen_sort_name, R.string.screen_sort_date, R.string.screen_sort_size).forEachIndexed { index, label ->
-                            DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { sort = index; sortMenu = false })
-                        }
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (selection.isNotEmpty()) {
-                    Text(stringResource(R.string.screen_selected, selection.size), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                    IconButton(onClick = { deleting = state.entries.filter { it.ref in selection } }, enabled = state.capabilities.delete && !busy) {
-                        Icon(Icons.Default.Delete, stringResource(R.string.screen_delete))
-                    }
-                    IconButton(onClick = { selection = emptySet() }) { Icon(Icons.Default.Close, stringResource(R.string.screen_clear_selection)) }
-                } else {
-                    Text(stringResource(R.string.screen_item_count, entries.size), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                    IconButton(onClick = onUpload, enabled = state.directory != null && state.capabilities.upload && !busy) { Icon(Icons.Default.Upload, stringResource(R.string.screen_upload)) }
-                    IconButton(onClick = { newFolder = true }, enabled = state.directory != null && state.capabilities.createDirectory && !busy) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.screen_new_folder)) }
-                    IconButton(onClick = onBackup, enabled = state.directory != null && state.capabilities.upload && !busy) { Icon(Icons.Default.AddToPhotos, stringResource(R.string.screen_backup_here)) }
-                }
-            }
-            if (state.capabilities.transportProtection != TransportProtection.UNKNOWN) Text(
-                stringResource(if (state.capabilities.transportProtection == TransportProtection.ENCRYPTED) R.string.screen_transport_encrypted else R.string.screen_transport_signed),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)) {
-            state.error?.let { error -> item {
-                Surface(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                        Text(error)
-                        TextButton(onClick = onRetry, enabled = !state.loading) { Text(stringResource(R.string.screen_retry)) }
-                    }
-                }
-            } }
-            if (!state.loading && state.error == null && entries.isEmpty()) item {
-                EmptyState(Icons.Default.FolderOpen,
-                    stringResource(if (query.isBlank()) R.string.screen_empty_folder else R.string.screen_no_results),
-                    stringResource(if (query.isBlank()) R.string.screen_empty_folder_detail else R.string.screen_no_results_detail))
-            }
-            items(entries, key = { "${it.ref.connectionId}:${it.ref.opaqueId}" }) { entry ->
-                var menu by remember { mutableStateOf(false) }
-                fun toggle() { selection = if (entry.ref in selection) selection - entry.ref else selection + entry.ref }
-                ListItem(
-                    modifier = Modifier.combinedClickable(onClick = { if (selection.isEmpty()) onOpen(entry) else toggle() }, onLongClick = { toggle() }),
-                    headlineContent = { Text(entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(entryDetail(entry), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = {
-                        if (selection.isNotEmpty()) Checkbox(entry.ref in selection, { toggle() })
-                        else Icon(if (entry.isDirectory) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = MaterialTheme.colorScheme.primary)
-                    },
-                    trailingContent = {
-                        if (selection.isEmpty()) Box {
-                            IconButton(onClick = { menu = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, stringResource(R.string.screen_more)) }
-                            DropdownMenu(menu, { menu = false }) {
-                                if (!entry.isDirectory) DropdownMenuItem(text = { Text(stringResource(R.string.screen_download)) }, onClick = { menu = false; onDownload(entry) })
-                                if (state.capabilities.rename) DropdownMenuItem(text = { Text(stringResource(R.string.screen_rename)) }, onClick = { menu = false; rename = entry })
-                                if (state.capabilities.delete) DropdownMenuItem(text = { Text(stringResource(R.string.screen_delete)) }, onClick = { menu = false; deleting = listOf(entry) })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.screen_select)) }, onClick = { menu = false; toggle() })
-                            }
-                        }
-                    })
-            }
-            if (!state.loading && !state.complete && state.entries.isNotEmpty()) item {
-                Text(stringResource(R.string.screen_partial_listing), Modifier.padding(20.dp), style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-    if (newFolder) NameDialog(stringResource(R.string.screen_new_folder), "", busy, { newFolder = false }) { onCreateDirectory(it); newFolder = false }
-    rename?.let { entry -> NameDialog(stringResource(R.string.screen_rename), entry.name, busy, { rename = null }) { onRename(entry, it); rename = null } }
-    deleting?.let { targets ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.screen_delete_confirm, targets.size)) },
-            text = { Text(targets.take(3).joinToString("\n") { it.name } + "\n\n" + stringResource(R.string.screen_delete_detail)) },
-            confirmButton = { TextButton(onClick = { onDelete(targets); deleting = null; selection = emptySet() }, enabled = !busy) { Text(stringResource(R.string.screen_delete), color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.screen_cancel)) } })
-    }
-}
-
-@Composable
-private fun NameDialog(title: String, initial: String, busy: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+internal fun NameDialog(title: String, initial: String, busy: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by rememberSaveable(initial) { mutableStateOf(initial) }
     val valid = name.isNotBlank() && name != "." && name != ".." && name.none { it in "/\\:*?\"<>|" || it.code < 32 } && !name.endsWith('.') && !name.endsWith(' ')
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { FormField(name, { name = it }, R.string.screen_file_name) },
@@ -396,10 +289,14 @@ private fun SettingToggle(label: String, checked: Boolean, onChange: (Boolean) -
 }
 
 @Composable
-fun SettingsScreen() = Page {
+fun SettingsScreen(thumbnailsUnmeteredOnly: Boolean = true, onThumbnailPolicy: (Boolean) -> Unit = {},
+    onClearThumbnails: () -> Unit = {}, updates: @Composable () -> Unit = {}) = Page {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PagePadding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { SettingToggle(stringResource(R.string.media_network_policy), thumbnailsUnmeteredOnly, onThumbnailPolicy) }
+        item { OutlinedButton(onClick = onClearThumbnails) { Text(stringResource(R.string.media_clear_cache)) } }
         item { Text("FileAccess", style = MaterialTheme.typography.headlineMedium) }
-        item { Text(stringResource(R.string.screen_app_version), style = MaterialTheme.typography.bodyMedium) }
+        item { Text("${space.zhuoling.fileaccess.BuildConfig.VERSION_NAME} · Android 15+", style = MaterialTheme.typography.bodyMedium) }
+        item { updates() }
         item { SettingsInfo(Icons.Default.Palette, stringResource(R.string.screen_appearance), stringResource(R.string.screen_appearance_detail)) }
         item { SettingsInfo(Icons.Default.Lock, stringResource(R.string.screen_privacy), stringResource(R.string.screen_privacy_detail)) }
         item { SettingsInfo(Icons.Default.CloudUpload, stringResource(R.string.screen_backup_policy), stringResource(R.string.screen_backup_intro)) }
@@ -415,7 +312,7 @@ private fun SettingsInfo(icon: ImageVector, title: String, detail: String) {
 }
 
 @Composable
-private fun entryDetail(entry: RemoteEntry): String = listOfNotNull(
+internal fun entryDetail(entry: RemoteEntry): String = listOfNotNull(
     if (entry.isDirectory) stringResource(R.string.screen_folder) else entry.size?.let(::bytes) ?: stringResource(R.string.screen_unknown_size),
     entry.modifiedAtEpochMillis?.let(::date),
 ).joinToString(" · ")

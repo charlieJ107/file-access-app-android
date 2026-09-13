@@ -19,6 +19,7 @@ import space.zhuoling.fileaccess.core.data.TransferRepository
 import space.zhuoling.fileaccess.core.data.TransferTask
 import space.zhuoling.fileaccess.core.model.*
 import space.zhuoling.fileaccess.core.storage.UploadCapability
+import space.zhuoling.fileaccess.core.storage.UploadCleanupCapability
 import space.zhuoling.fileaccess.core.storage.UploadRequest
 
 @Singleton
@@ -35,16 +36,52 @@ class TransferEngine @Inject constructor(
 
     fun stop(id: String) { active[id]?.cancel(CancellationException("Task interrupted")) }
 
-    suspend fun execute(id: String, onProgress: (Long, Long?) -> Unit = { _, _ -> }) {
-        val task = tasks.get(id) ?: return
-        concurrent.withPermit {
-            connections.getOrPut(task.remoteRef.connectionId) { Semaphore(1) }.withPermit {
-                runTransferChild { executeClaimed(id, onProgress) }
+    /** Terminal records remain as operation tombstones after their remote bookkeeping is retired. */
+    suspend fun cleanupUploads() {
+        val waiting = network.waitingReason(true, true, false)
+        if (waiting != null) {
+            for (task in tasks.uploadCleanupCandidates()) {
+                tasks.recordUploadCleanup(task.id, "远端临时数据尚未清理：$waiting")
+            }
+            return
+        }
+        for (task in tasks.uploadCleanupCandidates()) {
+            currentCoroutineContext().ensureActive()
+            if (active.containsKey(task.id)) continue
+            try {
+                remote.open(task.remoteRef.connectionId, task.connectionRevision).use { session ->
+                    val cleaner = session as? UploadCleanupCapability
+                        ?: throw StorageException(StorageError.UNSUPPORTED, "Remote upload cleanup is not supported")
+                    cleaner.cleanupUpload(UploadRequest(task.operationId, task.remoteRef, task.name),
+                        completed = task.state == TransferState.SUCCEEDED)
+                    tasks.recordUploadCleanup(task.id, null)
+                }
+            } catch (cancelled: CancellationException) {
+                // A timeout on the first offline destination must not starve the rest of the queue.
+                withContext(NonCancellable) { tasks.recordUploadCleanup(task.id, "远端临时数据清理已中断，等待下次重试") }
+                throw cancelled
+            }
+            catch (error: Exception) {
+                tasks.recordUploadCleanup(task.id, "远端临时数据尚未清理：${failureMessage(error)}")
             }
         }
     }
 
-    private suspend fun executeClaimed(id: String, onProgress: (Long, Long?) -> Unit) = coroutineScope {
+    suspend fun execute(id: String, onProgress: (Long, Long?) -> Unit = { _, _ -> }) =
+        executeInternal(id, automatic = false, onProgress)
+
+    suspend fun executeAutomatic(id: String) = executeInternal(id, automatic = true) { _, _ -> }
+
+    private suspend fun executeInternal(id: String, automatic: Boolean, onProgress: (Long, Long?) -> Unit) {
+        val task = tasks.get(id) ?: return
+        concurrent.withPermit {
+            connections.getOrPut(task.remoteRef.connectionId) { Semaphore(1) }.withPermit {
+                runTransferChild { executeClaimed(id, automatic, onProgress) }
+            }
+        }
+    }
+
+    private suspend fun executeClaimed(id: String, automatic: Boolean, onProgress: (Long, Long?) -> Unit) = coroutineScope {
         val lease = tasks.claim(id, UUID.randomUUID().toString()) ?: return@coroutineScope
         val task = lease.task
         val executionJob = currentCoroutineContext().job
@@ -100,18 +137,28 @@ class TransferEngine @Inject constructor(
                         val uploader = session as? UploadCapability
                             ?: throw StorageException(StorageError.UNSUPPORTED, "Upload is not supported")
                         val document = context.contentResolver.describe(Uri.parse(task.localUri))
+                        if (automatic && !session.capabilities.resumableUpload &&
+                            (document.size == null || document.size > 256L * 1024 * 1024)) {
+                            throw WaitForConditions("此连接暂不支持断点上传，大文件请在应用内手动启动")
+                        }
                         verifyCameraVersion(task)
                         if (task.sourceGeneration != null && document.version != task.sourceGeneration) {
                             throw StorageException(StorageError.SOURCE_CHANGED, "Local source changed")
                         }
-                        // SMB's initial writer restarts the current payload and reconciles its receipt.
-                        // The UI explicitly describes restart semantics; no byte-resume is advertised.
-                        if (!tasks.resetProgress(lease)) throw CancellationException("Task ownership changed")
-                        lastAcknowledged = 0
+                        var firstCheckpoint = true
                         val source = ContentUriSource(context.contentResolver, document) { checkRunning() }
                         val result = uploader.upload(
                             UploadRequest(task.operationId, task.remoteRef, task.name), source,
-                            onProgress = { progress(it, document.size) },
+                            onProgress = {
+                                if (firstCheckpoint) {
+                                    // The remote journal is authoritative, including fallback from a
+                                    // torn checkpoint. Do not reset durable UI progress before probing it.
+                                    if (!runBlocking { tasks.resetProgress(lease) }) throw CancellationException("Task ownership changed")
+                                    lastAcknowledged = 0
+                                    firstCheckpoint = false
+                                }
+                                progress(it, document.size)
+                            },
                             onCommit = {
                                 checkRunning(force = true)
                                 verifyCameraVersion(task)
@@ -225,7 +272,8 @@ class TransferEngine @Inject constructor(
             val current = tasks.get(id)
             val ambiguous = current?.state == TransferState.COMMITTING || (error as? StorageException)?.error == StorageError.OUTCOME_UNKNOWN
             val attempt = current?.attempt ?: task.attempt
-            val temporary = (error as? StorageException)?.error == StorageError.NETWORK && attempt < 5
+            val temporary = (error as? StorageException)?.error == StorageError.NETWORK &&
+                (task.backupRuleId != null || attempt < 5)
             val state = when { ambiguous && attempt < 5 -> TransferState.RECONCILING; temporary -> TransferState.WAITING; else -> TransferState.FAILED }
             val retryAt = System.currentTimeMillis() + retryDelay(attempt)
             if (state == TransferState.RECONCILING) {
@@ -263,8 +311,8 @@ internal fun failureMessage(error: Throwable): String = when (error) {
     is space.zhuoling.fileaccess.core.security.CredentialUnavailableException -> "已保存的凭据不可用，请重新登录此连接"
     is StorageException -> when (error.error) {
         StorageError.AUTHENTICATION -> "登录失败，请更新连接凭据"
-        StorageError.PERMISSION -> "共享或文件访问权限不足"
-        StorageError.NETWORK -> "NAS 暂时不可达；继续时会核对结果，上传可能需要从头重传"
+        StorageError.PERMISSION -> "本机或共享文件访问权限不足，请检查授权"
+        StorageError.NETWORK -> "NAS 暂时不可达；继续时会核对已保存的上传断点和提交结果"
         StorageError.CONFLICT -> "目标存在同名文件，未覆盖；请另取名称后重新上传"
         StorageError.SOURCE_CHANGED -> "源文件已变化，请重新创建任务"
         StorageError.OUTCOME_UNKNOWN -> "远端提交结果待确认，请继续同一任务进行核对"

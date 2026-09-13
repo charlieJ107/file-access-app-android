@@ -1,0 +1,82 @@
+name: Prepare signing key rotation
+run-name: Signing keys ${{ inputs.operation }} ${{ inputs.nonce }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Prepare an authorized rotation or inspect public signing state
+        required: true
+        type: choice
+        options: [prepare, inspect]
+      nonce:
+        description: Unique request nonce (32 lowercase hexadecimal characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  signing:
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the requested source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Ensure Android SDK tools for native signature verification
+        run: |
+          sdk_bin="$ANDROID_HOME/cmdline-tools/latest/bin"
+          if [[ -x "$sdk_bin/android" ]]; then
+            "$sdk_bin/android" --no-metrics --sdk="$ANDROID_HOME" sdk install platforms/android-37.0
+            "$sdk_bin/android" --no-metrics --sdk="$ANDROID_HOME" sdk install build-tools/36.0.0
+          else
+            "$sdk_bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+              'platforms;android-37.0' 'build-tools;36.0.0' </dev/null
+          fi
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+
+      - name: Verify request and prepare only public proof
+        env:
+          RELEASE_SIGNING_BUNDLE: ${{ secrets.RELEASE_SIGNING_BUNDLE }}
+          RELEASE_NEXT_SIGNING_BUNDLE: ${{ secrets.RELEASE_NEXT_SIGNING_BUNDLE }}
+          OPERATION: ${{ inputs.operation }}
+          NONCE: ${{ inputs.nonce }}
+        run: |
+          python3 scripts/prepare-signing-rotation.py --operation "$OPERATION" --nonce "$NONCE" \
+            --output build/signing-rotation-public --build-tools "$ANDROID_HOME/build-tools/36.0.0" \
+            --android-jar "$ANDROID_HOME/platforms/android-37.0/android.jar"
+
+      - name: Upload public signing metadata and authorization proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signing-rotation-${{ inputs.nonce }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            build/signing-rotation-public/metadata.json
+            build/signing-rotation-public/lineage.bin
+
+      - name: Clean temporary signing material
+        if: always()
+        run: |
+          find "$RUNNER_TEMP" -maxdepth 1 -type d \
+            \( -name 'fileaccess-rotation-*' -o -name 'fileaccess-signing-*' \) -exec rm -rf -- {} +

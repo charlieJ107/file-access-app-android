@@ -32,7 +32,7 @@ class SmbIntegrationTest {
 
     @Test fun authenticatesSignedListsUnicodeAndReadsARealRange() = runBlocking {
         assertEquals(TransportProtection.SIGNED, session.capabilities.transportProtection)
-        assertFalse(session.capabilities.resumableUpload)
+        assertTrue(session.capabilities.resumableUpload)
         val data = "0123456789 你好 & %20.txt".toByteArray()
         val uploaded = uploads.upload(request("相册 & 100%20.txt"), source(data), {})
         val listed = session.list(folder.ref).toList()
@@ -135,7 +135,7 @@ class SmbIntegrationTest {
         val file = uploads.upload(request, source("content".toByteArray()), {})
         mutations.delete(file.ref)
         val receipt = receiptRef(request)
-        rawWrite(receipt.opaqueId, ByteArray(UploadReceipt.MAX_BYTES) { 'x'.code.toByte() })
+        rawWrite(receipt.opaqueId, ByteArray(UploadReceipt.JOURNAL_BYTES) { 'x'.code.toByte() })
         assertTrue(session.list(folder.ref).toList().isEmpty())
         assertError(StorageError.CONFLICT) { mutations.delete(folder.ref) }
         assertEquals(receipt, session.stat(receipt).ref)
@@ -164,9 +164,9 @@ class SmbIntegrationTest {
         val committed = uploads.upload(request, source, {})
         val receiptRef = receiptRef(request)
         val token = checkNotNull(SmbPaths.receiptToken(receiptRef.opaqueId.substringAfterLast('\\')))
-        val receipt = session.openRead(receiptRef).use { UploadReceipt.decode(it.readBytes(), token) }
+        val receipt = session.openRead(receiptRef).use { UploadReceipt.decodeJournal(it.readBytes(), token) }
         // Reproduce the durable state after rename succeeded but before COMMITTED was recorded.
-        rawWrite(receiptRef.opaqueId, receipt.copy(phase = UploadReceipt.Phase.READY).encode())
+        rawWrite(receiptRef.opaqueId, receipt.copy(phase = UploadReceipt.Phase.READY, sequence = receipt.sequence + 1).encode())
         var commitCalled = false
         val reconciled = uploads.upload(request, source, {}, { commitCalled = true })
         assertTrue(commitCalled)
@@ -247,6 +247,228 @@ class SmbIntegrationTest {
     }
 
     private fun request(name: String) = UploadRequest(UUID.randomUUID().toString(), folder.ref, name)
+
+    @Test fun missingIdentifiedPayloadRequiresReconciliationAndIsNeverRecreated() = runBlocking {
+        val request = request("missing-payload.bin")
+        val bytes = ByteArray((UPLOAD_CHECKPOINT_BYTES + 73).toInt())
+        interruptAt(request, source(bytes), UPLOAD_CHECKPOINT_BYTES)
+        mutations.delete(partRef(request))
+        assertError(StorageError.OUTCOME_UNKNOWN) { uploads.upload(request, source(bytes), {}) }
+        assertError(StorageError.NOT_FOUND) { session.stat(partRef(request)) }
+        assertEquals(UPLOAD_CHECKPOINT_BYTES, readReceipt(request).length)
+    }
+
+    @Test fun finalVerificationResumesAfterWorkerStopsWithoutReuploadingPayload() = runBlocking {
+        val request = request("verification-slices.bin")
+        val bytes = ByteArray((3 * UPLOAD_CHECKPOINT_BYTES + 73).toInt()) { (it % 251).toByte() }
+        var opens = 0
+        val interrupted = object : UploadSource {
+            override val length = bytes.size.toLong()
+            override val version = "stable"
+            override fun open(): InputStream {
+                val checking = ++opens == 2
+                return object : ByteArrayInputStream(bytes) {
+                    override fun read(buffer: ByteArray, offset: Int, count: Int): Int {
+                        if (checking && pos >= UPLOAD_CHECKPOINT_BYTES) throw CancellationException("verification time slice ended")
+                        return super.read(buffer, offset, count)
+                    }
+                }
+            }
+        }
+        try { uploads.upload(request, interrupted, {}); fail("Expected verification interruption") }
+        catch (_: CancellationException) { }
+        assertEquals(UploadReceipt.Phase.VERIFYING, readReceipt(request).phase)
+        assertEquals(UPLOAD_CHECKPOINT_BYTES, readReceipt(request).verificationOffset)
+        session.close()
+        session = provider.connect(config(), credentials())
+        val offsets = mutableListOf<Long>()
+        val resumed = object : UploadSource {
+            override val length = bytes.size.toLong()
+            override val version = "stable"
+            override fun open() = ByteArrayInputStream(bytes)
+            override fun open(offset: Long): InputStream { offsets += offset; return super.open(offset) }
+        }
+        val progress = mutableListOf<Long>()
+        val file = uploads.upload(request, resumed, { progress += it })
+        assertEquals(UPLOAD_CHECKPOINT_BYTES, offsets.first())
+        assertEquals(bytes.size.toLong(), progress.first())
+        session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+    }
+
+    @Test fun actualProcessDeathKeepsDurableCheckpointAcrossIndependentJvms() = runBlocking {
+        val request = request("process-death.bin")
+        val classpath = requireNotNull(System.getProperty("fileaccess.test.classpath"))
+        assertTrue("Test runtime must expose its classpath for the crash client", classpath.isNotEmpty())
+        for (boundary in listOf(UPLOAD_CHECKPOINT_BYTES, 2 * UPLOAD_CHECKPOINT_BYTES)) {
+            val child = ProcessBuilder(File(System.getProperty("java.home"), "bin/java").absolutePath,
+                "-cp", classpath, SmbCrashClient::class.java.name, port.toString(), password,
+                folder.ref.opaqueId, request.operationId, boundary.toString()).redirectErrorStream(true).start()
+            try {
+                assertTrue("Crash client did not finish", child.waitFor(90, TimeUnit.SECONDS))
+                assertEquals(child.inputStream.bufferedReader().readText(), 91, child.exitValue())
+            } finally { if (child.isAlive) child.destroyForcibly() }
+            assertEquals(boundary, readReceipt(request).length)
+        }
+        val bytes = ByteArray((3 * UPLOAD_CHECKPOINT_BYTES + 71).toInt()) { (it % 251).toByte() }
+        var initial = -1L
+        val file = uploads.upload(request, source(bytes), { if (initial < 0) initial = it })
+        assertEquals(2 * UPLOAD_CHECKPOINT_BYTES, initial)
+        session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+    }
+
+    @Test fun serverQuotaAndPermissionFailuresKeepCheckpointForRetry() = runBlocking {
+        val bytes = ByteArray((2 * UPLOAD_CHECKPOINT_BYTES + 71).toInt()) { (it % 241).toByte() }
+        for ((fault, expected) in listOf("quota" to StorageError.QUOTA_EXCEEDED, "permission" to StorageError.PERMISSION)) {
+            val request = request("$fault.bin")
+            rawWrite(SmbPaths.join(folder.ref.opaqueId, ".fixture-fault-$fault"), byteArrayOf(1), create = true)
+            assertError(expected) { uploads.upload(request, source(bytes), {}) }
+            assertEquals(UPLOAD_CHECKPOINT_BYTES, readReceipt(request).length)
+            val progress = mutableListOf<Long>()
+            val file = uploads.upload(request, source(bytes), { progress += it })
+            assertEquals(UPLOAD_CHECKPOINT_BYTES, progress.first())
+            session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+        }
+    }
+
+    @Test fun repeatedTransportLossResumesConfirmedOffsetsAndNeverDuplicates() = runBlocking {
+        val request = request("resume.bin")
+        val bytes = ByteArray((3 * UPLOAD_CHECKPOINT_BYTES + 71).toInt()) { (it % 251).toByte() }
+        for (checkpoint in 1..3) {
+            val boundary = checkpoint * UPLOAD_CHECKPOINT_BYTES
+            try {
+                uploads.upload(request, source(bytes), { if (it >= boundary) { session.close(); throw CancellationException() } })
+                fail("Expected interruption")
+            } catch (_: CancellationException) { }
+            session = provider.connect(config(), credentials())
+            assertEquals(boundary, readReceipt(request).length)
+            assertTrue(session.list(folder.ref).toList().isEmpty())
+        }
+        val progress = mutableListOf<Long>()
+        val file = uploads.upload(request, source(bytes), { progress += it })
+        assertEquals(3 * UPLOAD_CHECKPOINT_BYTES, progress.first())
+        session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+        assertEquals(file.ref, uploads.upload(request, source(bytes), {}).ref)
+        assertEquals(1, session.list(folder.ref).toList().size)
+    }
+
+    @Test fun unconfirmedTailIsDiscardedAndTornJournalFallsBackToPreviousCheckpoint() = runBlocking {
+        val request = request("torn.bin")
+        val bytes = ByteArray((3 * UPLOAD_CHECKPOINT_BYTES + 17).toInt()) { (it % 239).toByte() }
+        interruptAt(request, source(bytes), 2 * UPLOAD_CHECKPOINT_BYTES)
+        val saved = readReceipt(request)
+        rawWrite(receiptRef(request).opaqueId, ByteArray(UploadReceipt.MAX_BYTES) { 0x7f },
+            (saved.sequence % 2) * UploadReceipt.MAX_BYTES)
+        rawWrite(partRef(request).opaqueId, "unconfirmed junk".toByteArray(), 2 * UPLOAD_CHECKPOINT_BYTES)
+        val progress = mutableListOf<Long>()
+        val file = uploads.upload(request, source(bytes), { progress += it })
+        assertEquals(UPLOAD_CHECKPOINT_BYTES, progress.first())
+        session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+    }
+
+    @Test fun changedPrefixIsRejectedEvenWhenSourceMetadataIsUnchanged() = runBlocking {
+        val request = request("source-prefix.bin")
+        val bytes = ByteArray((UPLOAD_CHECKPOINT_BYTES + 100).toInt()) { 1 }
+        interruptAt(request, source(bytes), UPLOAD_CHECKPOINT_BYTES)
+        bytes[0] = 2
+        assertError(StorageError.SOURCE_CHANGED) { uploads.upload(request, source(bytes), {}) }
+        assertTrue(session.list(folder.ref).toList().isEmpty())
+    }
+
+    @Test fun remotePrefixCorruptionIsRejectedAndRetained() = runBlocking {
+        val request = request("remote-prefix.bin")
+        val bytes = ByteArray((UPLOAD_CHECKPOINT_BYTES + 100).toInt()) { 1 }
+        interruptAt(request, source(bytes), UPLOAD_CHECKPOINT_BYTES)
+        rawWrite(partRef(request).opaqueId, byteArrayOf(2))
+        assertError(StorageError.CORRUPT_DATA) { uploads.upload(request, source(bytes), {}) }
+        assertEquals(UPLOAD_CHECKPOINT_BYTES, session.stat(partRef(request)).size)
+    }
+
+    @Test fun cancelledPayloadCleanupIsIdempotentAndNeverDeletesPublishedFiles() = runBlocking {
+        val request = request("abort.bin")
+        val bytes = ByteArray((UPLOAD_CHECKPOINT_BYTES + 100).toInt())
+        interruptAt(request, source(bytes), UPLOAD_CHECKPOINT_BYTES)
+        val cleaner = session as UploadCleanupCapability
+        cleaner.cleanupUpload(request, completed = false)
+        cleaner.cleanupUpload(request, completed = false)
+        assertError(StorageError.NOT_FOUND) { session.stat(partRef(request)) }
+        assertError(StorageError.NOT_FOUND) { session.stat(receiptRef(request)) }
+        val committedRequest = request("keep-published.bin")
+        val file = uploads.upload(committedRequest, source(byteArrayOf(1, 2)), {})
+        assertError(StorageError.OUTCOME_UNKNOWN) { cleaner.cleanupUpload(committedRequest, completed = false) }
+        cleaner.cleanupUpload(committedRequest, completed = true)
+        cleaner.cleanupUpload(committedRequest, completed = true)
+        session.openRead(file.ref).use { assertArrayEquals(byteArrayOf(1, 2), it.readBytes()) }
+    }
+
+    @Test fun cancelledCleanupRetainsUnidentifiedReplacement() = runBlocking {
+        val request = request("replaced-part.bin")
+        val bytes = ByteArray((UPLOAD_CHECKPOINT_BYTES + 100).toInt())
+        interruptAt(request, source(bytes), UPLOAD_CHECKPOINT_BYTES)
+        val part = partRef(request)
+        mutations.rename(part, "original-part.bin") // Keep original inode allocated.
+        rawWrite(part.opaqueId, byteArrayOf(7), create = true)
+        assertError(StorageError.OUTCOME_UNKNOWN) {
+            (session as UploadCleanupCapability).cleanupUpload(request, completed = false)
+        }
+        session.openRead(part).use { assertArrayEquals(byteArrayOf(7), it.readBytes()) }
+    }
+
+    @Test fun multiGiBVideoSurvivesThreeFreshConnections() = runBlocking {
+        Assume.assumeTrue(System.getenv("FILEACCESS_SMB_LARGE_TEST") == "1")
+        val request = request("large-video.bin")
+        val length = 3L * 1024 * 1024 * 1024 + 73
+        val source = object : UploadSource {
+            override val length = length
+            override val version = "generated-video-v1"
+            override fun open(): InputStream = object : InputStream() {
+                var position = 0L
+                override fun read(): Int = if (position >= length) -1 else ((position++ % 251).toInt())
+                override fun read(bytes: ByteArray, offset: Int, count: Int): Int {
+                    if (count == 0) return 0
+                    if (position >= length) return -1
+                    val size = minOf(count.toLong(), length - position).toInt()
+                    for (i in 0 until size) bytes[offset + i] = ((position + i) % 251).toByte()
+                    position += size
+                    return size
+                }
+            }
+        }
+        for (boundary in listOf(512L * 1024 * 1024, 1536L * 1024 * 1024, 2560L * 1024 * 1024)) {
+            interruptAt(request, source, boundary)
+            session.close()
+            session = provider.connect(config(), credentials())
+            assertEquals(boundary, readReceipt(request).length)
+        }
+        var first = -1L
+        val file = uploads.upload(request, source, { if (first < 0) first = it })
+        assertEquals(2560L * 1024 * 1024, first)
+        assertEquals(length, file.size)
+        val expected = java.security.MessageDigest.getInstance("SHA-256")
+        val actual = java.security.MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(256 * 1024)
+        source.open().use { input -> while (true) { val count = input.read(buffer); if (count < 0) break; expected.update(buffer, 0, count) } }
+        session.openRead(file.ref).use { input -> while (true) { val count = input.read(buffer); if (count < 0) break; actual.update(buffer, 0, count) } }
+        assertArrayEquals(expected.digest(), actual.digest())
+        assertEquals(file.ref, uploads.upload(request, source, {}).ref)
+        assertEquals(1, session.list(folder.ref).toList().size)
+    }
+
+    private suspend fun interruptAt(request: UploadRequest, source: UploadSource, offset: Long) {
+        try {
+            uploads.upload(request, source, { if (it >= offset) throw CancellationException("simulated process interruption") })
+            fail("Expected interruption")
+        } catch (_: CancellationException) { }
+    }
+
+    private suspend fun readReceipt(request: UploadRequest): UploadReceipt {
+        val ref = receiptRef(request)
+        val token = checkNotNull(SmbPaths.receiptToken(ref.opaqueId.substringAfterLast('\\')))
+        return session.openRead(ref).use { UploadReceipt.decodeJournal(it.readBytes(), token) }
+    }
+
+    private fun partRef(request: UploadRequest) = receiptRef(request).let {
+        it.copy(opaqueId = it.opaqueId.removeSuffix(".receipt") + ".part")
+    }
     private fun receiptRef(request: UploadRequest): EntryRef {
         val target = SmbPaths.join(request.parent.opaqueId, request.name)
         val token = SmbPaths.operationToken(request.operationId, "integration", target)

@@ -60,4 +60,6 @@ data class AppSettings(
     val theme: String = "system",
     val showHiddenFiles: Boolean = false,
     val showFileNamesInNotifications: Boolean = false,
+    val browserViewMode: String = "list",
+    val mediaThumbnailsUnmeteredOnly: Boolean = true,
 )

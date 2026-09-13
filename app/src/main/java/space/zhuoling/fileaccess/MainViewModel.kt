@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import space.zhuoling.fileaccess.core.data.AppSettings
+import space.zhuoling.fileaccess.core.data.SettingsRepository
+import space.zhuoling.fileaccess.thumbnail.ThumbnailRepository
 import space.zhuoling.fileaccess.core.data.BackupRepository
 import space.zhuoling.fileaccess.core.data.BackupRule
 import space.zhuoling.fileaccess.core.data.ConnectionRepository
@@ -40,6 +43,9 @@ data class BrowserState(
     val loading: Boolean = false,
     val error: String? = null,
     val complete: Boolean = false,
+    val connectionRevision: Long? = null,
+    val listingEpoch: Long = 0,
+    val requestedRef: EntryRef? = null,
 )
 
 @HiltViewModel
@@ -51,7 +57,10 @@ class MainViewModel @Inject constructor(
     private val registry: ProviderRegistry,
     private val remote: RemoteAccess,
     private val scheduler: TransferScheduler,
+    private val settingsRepository: SettingsRepository,
+    val thumbnails: ThumbnailRepository,
 ) : ViewModel() {
+    val settings = settingsRepository.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
     val connections = connectionRepository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val transfers = transferRepository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val rules = backupRepository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -62,9 +71,21 @@ class MainViewModel @Inject constructor(
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
     private var listing: Job? = null
+    private var listingEpoch = 0L
     private var requestedDirectory: EntryRef? = null
 
     init {
+        viewModelScope.launch {
+            connectionRepository.observeAll().collect { configs ->
+                val state = _browser.value
+                val directory = state.directory ?: return@collect
+                val config = configs.firstOrNull { it.id == directory.ref.connectionId }
+                if (config == null) {
+                    listing?.cancel()
+                    _browser.value = BrowserState(error = "连接已移除", requestedRef = requestedDirectory)
+                } else if (state.connectionRevision != null && config.revision != state.connectionRevision) refresh()
+            }
+        }
         viewModelScope.launch {
             try { scheduler.initialize() }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -72,19 +93,40 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun setBrowserViewMode(mode: String) {
+        viewModelScope.launch {
+            try { settingsRepository.setBrowserViewMode(mode) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { _message.value = "视图偏好未能保存，本次选择仍有效" }
+        }
+    }
+    fun setThumbnailNetworkPolicy(unmetered: Boolean) {
+        viewModelScope.launch {
+            try { settingsRepository.setMediaThumbnailsUnmeteredOnly(unmetered) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { _message.value = "缩略图偏好未能保存" }
+        }
+    }
+    fun clearThumbnails() { viewModelScope.launch { thumbnails.clearCache(); _message.value = "缩略图缓存已清除" } }
+
     fun clearMessage() { _message.value = null }
     fun notify(message: String) { _message.value = message }
 
     fun loadDirectory(connectionId: String, opaqueId: String = "") {
         requestedDirectory = EntryRef(connectionId, opaqueId)
         listing?.cancel()
-        _browser.value = BrowserState(loading = true)
+        _browser.value = BrowserState(loading = true, listingEpoch = ++listingEpoch, requestedRef = requestedDirectory)
         listing = viewModelScope.launch {
             try {
-                remote.withSession(connectionId) { session ->
+                val config = connectionRepository.get(connectionId)
+                    ?: throw StorageException(StorageError.INVALID_CONFIGURATION, "Connection removed")
+                withContext(Dispatchers.IO) { remote.open(connectionId, config.revision).use { session ->
                     val directory = if (opaqueId.isEmpty()) session.root else session.stat(EntryRef(connectionId, opaqueId))
                     currentCoroutineContext().ensureActive()
-                    _browser.update { it.copy(directory = directory, capabilities = session.capabilities) }
+                    if (connectionRepository.get(connectionId)?.revision != config.revision) {
+                        throw StorageException(StorageError.INVALID_CONFIGURATION, "Connection changed while listing")
+                    }
+                    _browser.update { it.copy(directory = directory, capabilities = session.capabilities, connectionRevision = config.revision) }
                     val entries = mutableListOf<RemoteEntry>()
                     session.list(directory.ref).collect { entry ->
                         currentCoroutineContext().ensureActive()
@@ -93,7 +135,7 @@ class MainViewModel @Inject constructor(
                     }
                     currentCoroutineContext().ensureActive()
                     _browser.update { it.copy(entries = entries.toList(), loading = false, complete = true) }
-                }
+                } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { _browser.update { it.copy(loading = false, error = error.userMessage()) } }
         }
@@ -122,6 +164,7 @@ class MainViewModel @Inject constructor(
     fun removeConnection(id: String) = action {
         transferRepository.observeAll().first().filter { it.remoteRef.connectionId == id }.forEach { scheduler.cancel(it.id) }
         connectionRepository.delete(id)
+        thumbnails.invalidateConnection(id)
         _message.value = "已移除此连接，远端文件保留"
     }
 
@@ -139,6 +182,7 @@ class MainViewModel @Inject constructor(
             (session as? MutationCapability)?.rename(entry.ref, name, entry.revision)
                 ?: throw StorageException(StorageError.UNSUPPORTED, "Unsupported")
         }
+        thumbnails.invalidateEntry(entry.ref)
         refresh()
     }
 
@@ -151,6 +195,7 @@ class MainViewModel @Inject constructor(
                     val mutations = session as? MutationCapability ?: throw StorageException(StorageError.UNSUPPORTED, "Unsupported")
                     mutations.delete(entry.ref, entry.revision)
                 }
+                thumbnails.invalidateEntry(entry.ref)
                 succeeded++
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { errors.add("${entry.name}：${error.userMessage()}") }
