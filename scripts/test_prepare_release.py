@@ -27,7 +27,7 @@ class ReleaseGateTest(unittest.TestCase):
         return output.getvalue()
 
     def previous(self, tag="v1.9.0", code=11, draft=False):
-        return {"tag_name": tag, "draft": draft, "prerelease": False, "assets": [{"name": f"fileaccess-{code}.apk"}]}
+        return {"tag_name": tag, "draft": draft, "prerelease": False, "target_commitish": "abc", "assets": [{"name": f"fileaccess-{code}.apk"}]}
 
     def test_first_release_and_numeric_semver_increase(self):
         self.assertIn("tag=v1.10.0", self.run_gate())
@@ -51,6 +51,12 @@ class ReleaseGateTest(unittest.TestCase):
     def test_invalid_version_is_rejected(self):
         for name in ["01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build"]:
             with self.assertRaises(ValueError): self.run_gate(name=name)
+
+    def test_pending_draft_without_tag_requires_exact_commit(self):
+        draft = self.previous(tag="v1.10.0", draft=True)
+        self.assertIn("exists=true", self.run_gate([draft]))
+        for target in ["different", "master", None]:
+            with self.assertRaises(ValueError): self.run_gate([{**draft, "target_commitish": target}])
 
 
 if __name__ == "__main__":

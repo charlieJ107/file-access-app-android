@@ -47,6 +47,8 @@ def main():
     tag_commit = subprocess.run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], capture_output=True, text=True)
     if tag_commit.returncode == 0 and tag_commit.stdout.strip() != os.environ["GITHUB_SHA"]:
         raise ValueError("Release tag points to another commit; never move a release tag")
+    if existing and tag_commit.returncode != 0 and existing.get("target_commitish") != os.environ["GITHUB_SHA"]:
+        raise ValueError("Pending draft must target the exact original commit SHA; never replace another commit's draft assets")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write(f"tag={tag}\ncode={code}\nexists={str(existing is not None).lower()}\n")
 

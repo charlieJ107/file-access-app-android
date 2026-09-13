@@ -106,7 +106,10 @@ jobs:
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
             "build/release/fileaccess-$VERSION_CODE.apk" build/release/SHA256SUMS --clobber
           # The app requires GitHub's SHA-256 digest; never publish incomplete assets.
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > build/release/metadata.json
+          # Pending draft tags have no REST /releases/tags lookup. gh resolves drafts by ID.
+          release_id="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > build/release/metadata.json
           python3 scripts/verify-release-assets.py build/release/metadata.json "build/release/fileaccess-$VERSION_CODE.apk"
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
