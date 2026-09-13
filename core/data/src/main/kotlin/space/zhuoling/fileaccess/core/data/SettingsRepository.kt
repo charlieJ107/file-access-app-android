@@ -19,6 +19,8 @@ class SettingsRepository(context: Context) {
         if (error is IOException) emit(emptyPreferences()) else throw error
     }.map { values ->
         AppSettings(
+            browserViewMode = values[BROWSER_VIEW_MODE]?.takeIf { it in setOf("list", "grid") } ?: "list",
+            mediaThumbnailsUnmeteredOnly = values[THUMBNAILS_UNMETERED] ?: true,
             theme = values[THEME] ?: "system",
             showHiddenFiles = values[SHOW_HIDDEN] ?: false,
             showFileNamesInNotifications = values[NOTIFICATION_NAMES] ?: false,
@@ -34,7 +36,15 @@ class SettingsRepository(context: Context) {
         store.edit { it[NOTIFICATION_NAMES] = value }
     }
 
+    suspend fun setBrowserViewMode(value: String) {
+        require(value in setOf("list", "grid"))
+        store.edit { it[BROWSER_VIEW_MODE] = value }
+    }
+    suspend fun setMediaThumbnailsUnmeteredOnly(value: Boolean) { store.edit { it[THUMBNAILS_UNMETERED] = value } }
+
     private companion object {
+        val BROWSER_VIEW_MODE = stringPreferencesKey("browser_view_mode")
+        val THUMBNAILS_UNMETERED = booleanPreferencesKey("media_thumbnails_unmetered_only")
         val THEME = stringPreferencesKey("theme")
         val SHOW_HIDDEN = booleanPreferencesKey("show_hidden_files")
         val NOTIFICATION_NAMES = booleanPreferencesKey("notification_file_names")

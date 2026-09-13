@@ -53,6 +53,7 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
     val connections by model.connections.collectAsStateWithLifecycle()
     val tasks by model.transfers.collectAsStateWithLifecycle()
     val rules by model.rules.collectAsStateWithLifecycle()
+    val settings by model.settings.collectAsStateWithLifecycle()
     var editConnectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val editConnection = connections.firstOrNull { it.id == editConnectionId }
     var showEditor by rememberSaveable { mutableStateOf(false) }
@@ -173,20 +174,24 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
                             entry<Browse> { key ->
                                 LaunchedEffect(key) { model.loadDirectory(key.connectionId, key.opaqueId) }
                                 val state by model.browser.collectAsStateWithLifecycle()
-                                BrowserScreen(state, busy,
+                                val displayed = if (state.requestedRef == EntryRef(key.connectionId, key.opaqueId)) state else space.zhuoling.fileaccess.BrowserState(loading = true)
+                                BrowserScreen(displayed, busy,
                                     onOpen = { if (it.isDirectory) stack.add(Browse(it.ref.connectionId, it.ref.opaqueId, it.name)) else stack.add(Preview(it.ref.connectionId, it.ref.opaqueId)) },
                                     onUpload = {
                                         state.directory?.ref?.let { uploadConnection = it.connectionId; uploadDirectory = it.opaqueId; uploadPicker.launch(arrayOf("*/*")) }
                                     }, onCreateDirectory = model::createDirectory,
                                     onRename = model::rename, onDelete = model::delete, onDownload = ::download,
-                                    onBackup = { treeUri = ""; showRule = true }, onRetry = model::refresh)
+                                    onBackup = { treeUri = ""; showRule = true }, onRetry = model::refresh,
+                                    directoryKey = space.zhuoling.fileaccess.thumbnail.entryKey(EntryRef(key.connectionId, key.opaqueId)),
+                                    viewMode = settings.browserViewMode, onViewModeChange = model::setBrowserViewMode,
+                                    thumbnails = model.thumbnails, unmeteredOnly = settings.mediaThumbnailsUnmeteredOnly)
                             }
                             entry<Preview> { key ->
                                 PreviewScreen(EntryRef(key.connectionId, key.opaqueId), previewRepository, remote, ::download)
                             }
                             entry<Transfers> { TransfersScreen(tasks, model::pauseTransfer, model::resumeTransfer, model::cancelTransfer) }
                             entry<Backups> { BackupScreen(rules, tasks, model::toggleRule, model::deleteRule, { requestNotifications(); model.backupNow() }, { navigate(Spaces) }) }
-                            entry<Settings> { SettingsScreen() }
+                            entry<Settings> { SettingsScreen(settings.mediaThumbnailsUnmeteredOnly, model::setThumbnailNetworkPolicy, model::clearThumbnails) }
                         },
                     )
                 }

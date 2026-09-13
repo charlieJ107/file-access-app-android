@@ -1,0 +1,14 @@
+<resources>
+    <string name="media_switch_grid">切换为网格</string>
+    <string name="media_switch_list">切换为列表</string>
+    <string name="media_video">视频</string>
+    <string name="media_unavailable">缩略图不可用</string>
+    <string name="media_load">加载缩略图</string>
+    <string name="media_continue">继续加载缩略图</string>
+    <string name="media_paused">部分缩略图已暂停；可继续加载或打开原文件</string>
+    <string name="media_metered">当前网络按流量计费，自动缩略图已暂停</string>
+    <string name="media_auth">无法读取缩略图，请检查连接和访问权限</string>
+    <string name="media_network_policy">仅在非计费网络自动加载缩略图</string>
+    <string name="media_clear_cache">清除缩略图缓存</string>
+    <string name="media_reload">重新加载缩略图</string>
+</resources>
