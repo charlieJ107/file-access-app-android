@@ -113,7 +113,7 @@ fun BrowserScreen(state: BrowserState, busy: Boolean, onOpen: (RemoteEntry) -> U
                 allowMeteredOnce = true; budget?.extend(); failure = null; thumbnails.retry()
             }) { Text(stringResource(if (failure == ThumbnailFailure.METERED) R.string.media_load else R.string.media_continue)) }
         }
-        BrowserItems(entries, grid, "$query:$sort", Modifier.weight(1f), header = {
+        BrowserItems(entries, grid, "$query:$sort", Modifier.weight(1f), listingComplete = state.complete, header = {
             state.error?.let { error ->
                 Surface(Modifier.padding(horizontal = 4.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {

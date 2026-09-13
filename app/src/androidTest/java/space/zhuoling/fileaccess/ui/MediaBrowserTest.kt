@@ -2,6 +2,7 @@ package space.zhuoling.fileaccess.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -67,6 +68,28 @@ class MediaBrowserTest {
         assertTrue("Only the viewport should be composed", compose.onAllNodes(hasText("file_", substring = true)).fetchSemanticsNodes().size < 100)
         compose.onNodeWithContentDescription("切换为列表").performClick()
         compose.onNodeWithText("file_05000.png").assertIsDisplayed()
+    }
+
+    @Test fun batchedRefreshWaitsForTheOriginalAnchorInBothLayouts() {
+        val entries = (0 until 600).map { index -> file.copy(ref = EntryRef("fixture", "$index"), name = "file_${index.toString().padStart(5, '0')}.png") }
+        val state = mutableStateOf(BrowserState(root, entries, complete = true))
+        compose.setContent { FileAccessTheme {
+            BrowserScreen(state.value, false, {}, {}, {}, { _, _ -> }, {}, {}, {}, {})
+        } }
+        repeat(2) { layout ->
+            if (layout == 1) compose.onNodeWithContentDescription("切换为网格").performClick()
+            compose.onNode(hasScrollToIndexAction()).performScrollToIndex(501)
+            compose.onNodeWithText("file_00500.png").assertIsDisplayed()
+            compose.runOnIdle { state.value = BrowserState(root, loading = true) }
+            compose.waitForIdle()
+            compose.runOnIdle { state.value = BrowserState(root, entries.take(100), loading = true) }
+            compose.waitForIdle()
+            compose.onNodeWithText("file_00500.png").assertDoesNotExist()
+            compose.runOnIdle { state.value = BrowserState(root, entries.take(300), loading = true) }
+            compose.waitForIdle()
+            compose.runOnIdle { state.value = BrowserState(root, entries, complete = true) }
+            compose.onNodeWithText("file_00500.png").assertIsDisplayed()
+        }
     }
 
     @Test fun generatedMediaProducesReviewableGridAndListScreenshots() = runBlocking<Unit> {

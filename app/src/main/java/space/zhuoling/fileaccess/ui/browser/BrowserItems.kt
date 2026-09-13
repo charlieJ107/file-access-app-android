@@ -33,6 +33,7 @@ import space.zhuoling.fileaccess.thumbnail.*
 @Composable
 internal fun BrowserItems(
     entries: List<RemoteEntry>, grid: Boolean, resetKey: String, modifier: Modifier = Modifier,
+    listingComplete: Boolean,
     header: @Composable () -> Unit, footer: @Composable () -> Unit,
     content: @Composable (RemoteEntry, Boolean) -> Unit,
 ) {
@@ -41,14 +42,28 @@ internal fun BrowserItems(
     var previousGrid by rememberSaveable { mutableStateOf(grid) }
     var previousReset by rememberSaveable { mutableStateOf(resetKey) }
     var anchor by rememberSaveable { mutableStateOf<String?>(null) }
-    // Keep an item identity while a refresh temporarily empties the directory snapshot.
-    LaunchedEffect(grid, resetKey, entries.isEmpty()) {
-        if (entries.isEmpty()) return@LaunchedEffect
+    var pendingAnchor by rememberSaveable { mutableStateOf<String?>(null) }
+    // A refresh arrives in batches. Keep its original identity until that item arrives,
+    // or the complete listing confirms that it was removed.
+    LaunchedEffect(grid, resetKey, entries, listingComplete) {
         if (previousReset != resetKey) {
-            listState.scrollToItem(0); gridState.scrollToItem(0); anchor = null
-        } else if (previousGrid != grid || anchor != null) {
-            val target = anchor?.let { key -> entries.indexOfFirst { entryKey(it.ref) == key }.takeIf { it >= 0 } } ?: 0
-            if (grid) gridState.scrollToItem(target + 1) else listState.scrollToItem(target + 1)
+            pendingAnchor = null; anchor = null
+            listState.scrollToItem(0); gridState.scrollToItem(0)
+        } else if (entries.isEmpty()) {
+            if (listingComplete) { pendingAnchor = null; anchor = null }
+            else if (pendingAnchor == null) pendingAnchor = anchor
+        } else {
+            val desired = pendingAnchor ?: anchor.takeIf { previousGrid != grid }
+            if (desired != null) {
+                pendingAnchor = desired
+                val target = entries.indexOfFirst { entryKey(it.ref) == desired }
+                if (target >= 0 || listingComplete) {
+                    val index = if (target >= 0) target + 1 else 0
+                    if (grid) gridState.scrollToItem(index) else listState.scrollToItem(index)
+                    anchor = desired.takeIf { target >= 0 }
+                    pendingAnchor = null
+                }
+            }
         }
         previousGrid = grid; previousReset = resetKey
     }
@@ -56,7 +71,7 @@ internal fun BrowserItems(
         if (entries.isNotEmpty()) snapshotFlow {
             if (grid) gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.key is String && it.key != "header" }?.key as? String
             else listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key is String && it.key != "header" }?.key as? String
-        }.collect { if (it != null && it != "footer") anchor = it }
+        }.collect { if (pendingAnchor == null && it != null && it != "footer") anchor = it }
     }
     val visible by remember(grid, entries) { derivedStateOf {
         if (grid) {
