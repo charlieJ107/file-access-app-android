@@ -35,6 +35,24 @@ interface UploadSource {
     val version: String? get() = null
     fun currentVersion(): String? = version
     fun open(): InputStream
+
+    /** Position a repeatable source without allocating or staging its prefix. */
+    fun open(offset: Long): InputStream {
+        require(offset >= 0)
+        val input = open()
+        try {
+            var remaining = offset
+            while (remaining > 0) {
+                if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException()
+                val skipped = input.skip(remaining)
+                if (skipped > 0) remaining -= skipped
+                else if (input.read() < 0) throw space.zhuoling.fileaccess.core.model.StorageException(
+                    space.zhuoling.fileaccess.core.model.StorageError.SOURCE_CHANGED, "Source ended before its checkpoint")
+                else remaining--
+            }
+            return input
+        } catch (error: Exception) { input.close(); throw error }
+    }
 }
 
 data class UploadRequest(
@@ -43,7 +61,7 @@ data class UploadRequest(
     val name: String,
 )
 
-/** Initial upload capability is non-overwriting. Resumable sessions are a separate extension. */
+/** Non-overwriting uploads. A resumable provider durably records checkpoints before onProgress. */
 interface UploadCapability {
     /** Reconcile this operation's temporary/committed object before retrying an unknown result. */
     suspend fun upload(
@@ -52,6 +70,14 @@ interface UploadCapability {
         onProgress: (Long) -> Unit,
         onCommit: () -> Unit = {},
     ): RemoteEntry
+}
+
+interface UploadCleanupCapability {
+    /** Caller must retain a durable terminal task and never retry its operation after cleanup.
+     * completed=true retires only a committed receipt; false aborts an uncommitted payload.
+     * Never removes the published target. Ambiguous ownership must fail and retain data.
+     */
+    suspend fun cleanupUpload(request: UploadRequest, completed: Boolean)
 }
 
 interface MutationCapability {
