@@ -4,7 +4,7 @@
 
 ## 开发约定
 
-先阅读 [分支与发布规范](docs/branching-and-releases.md)、[开发说明](docs/development.md)、[设计入口](docs/design/README.md) 和 [当前实现边界](docs/implementation-status.md)。普通 PR 合入 `staging`，正式发布通过 `staging → master` PR 触发 GitHub Actions。首阶段聚焦 SMB 和 Android 16；其他协议通过 `core:storage-api` 的能力接口接入。
+先阅读 [分支与发布规范](docs/branching-and-releases.md)、[开发说明](docs/development.md)、[设计入口](docs/design/README.md) 和 [当前实现边界](docs/implementation-status.md)。普通 PR 合入 `master`，正式发布通过 `master → release` PR 触发 GitHub Actions，不使用长期 `staging` 分支。首阶段聚焦 SMB 和 Android 16；其他协议通过 `core:storage-api` 的能力接口接入。
 
 - 使用 Kotlin、Compose、ViewModel / Flow 和现有依赖注入方式；让 UI 状态、持久化、传输调度和协议实现保持模块边界。
 - 在协议层处理远端路径、版本核对和资源释放，不把 SMBJ 类型、密码或网络会话传入 UI。

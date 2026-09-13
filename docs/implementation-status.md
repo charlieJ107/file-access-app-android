@@ -2,7 +2,7 @@
 
 ## 2026-09-13：发布管理、自动更新与图标
 
-新增[分支与发布规范](branching-and-releases.md)及根目录 `AGENTS.md`：普通 PR 进入 staging，发布 PR 从 staging 合入 master；GitHub Actions 复用 CI 后签名构建，通过 GitHub CLI 发布。版本统一读取 `version.properties`。
+新增[分支与发布规范](branching-and-releases.md)及根目录 `AGENTS.md`。最初采用 staging 汇总、master 发布，现按客户端项目的开发方式调整为普通 PR 合入 master、发布 PR 从 master 合入 release，不再保留长期 staging。GitHub Actions 复用 CI 后签名构建，通过 GitHub CLI 发布。版本统一读取 `version.properties`。
 
 App 自动/手动检查 GitHub 稳定 Release，按 SemVer 2.0 比较版本；下载、取消、SHA-256/包名/版本/最低 SDK/签名校验、安装来源授权与系统安装入口已实现。前台自动检查最多每天一次，不提供后台静默安装。正式更新源需由维护者公开当前仓库并配置长期签名 Secrets。新增[原创 Logo 与启动图标资产](brand/README.md)。
 

@@ -18,7 +18,7 @@ GitHub 仓库：[charlieJ107/file-access-app-android](https://github.com/charlie
 
 开发协作见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全报告见 [SECURITY.md](SECURITY.md)。
 
-[Android CI](https://github.com/charlieJ107/file-access-app-android/actions/workflows/android-ci.yml) 在 `staging` 推送和 PR 时执行 Debug 构建、JVM 单元测试及 Lint，测试报告保留 7 天。`staging → master` 发布 PR 合并后，[Release 工作流](.github/workflows/release.yml) 复用上述检查，再签名构建、校验并创建 GitHub Release。首次发布前由维护者公开仓库并配置签名 Secrets；详见[分支与发布规范](docs/branching-and-releases.md)。真实 SMB 网络测试和 Android 设备测试需要单独准备隔离环境，不计入默认 CI 的通过范围。
+[Android CI](https://github.com/charlieJ107/file-access-app-android/actions/workflows/android-ci.yml) 在 `master` 推送和 PR 时执行 Debug 构建、JVM 单元测试及 Lint，测试报告保留 7 天。`master` 用于日常集成；`master → release` 发布 PR 合并后，[Release 工作流](.github/workflows/release.yml) 复用上述检查，再签名构建、校验并创建 GitHub Release。首次发布前由维护者公开仓库并配置签名 Secrets；详见[分支与发布规范](docs/branching-and-releases.md)。真实 SMB 网络测试和 Android 设备测试需要单独准备隔离环境，不计入默认 CI 的通过范围。
 
 ## 运行
 

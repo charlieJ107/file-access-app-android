@@ -12,7 +12,7 @@ spec.loader.exec_module(release)
 
 
 class ReleaseGateTest(unittest.TestCase):
-    def run_gate(self, releases=None, private=False, ref="refs/heads/master", tag_commit=None, name="1.10.0", code=12):
+    def run_gate(self, releases=None, private=False, ref="refs/heads/release", tag_commit=None, name="1.10.0", code=12):
         output = io.StringIO()
         # Keep the captured output open after the script's context manager.
         class Output:
@@ -35,7 +35,8 @@ class ReleaseGateTest(unittest.TestCase):
 
     def test_private_repository_or_wrong_branch_cannot_publish(self):
         with self.assertRaises(ValueError): self.run_gate(private=True)
-        with self.assertRaises(ValueError): self.run_gate(ref="refs/heads/staging")
+        for ref in ["refs/heads/master", "refs/heads/staging", "refs/heads/feature/test", "refs/tags/v1.10.0"]:
+            with self.subTest(ref=ref), self.assertRaises(ValueError): self.run_gate(ref=ref)
 
     def test_published_versions_are_immutable(self):
         with self.assertRaises(ValueError): self.run_gate([self.previous(tag="v1.10.0")])

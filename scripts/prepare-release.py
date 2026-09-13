@@ -17,8 +17,8 @@ def stable_version(value):
 
 
 def main():
-    if os.environ["GITHUB_REF"] != "refs/heads/master":
-        raise ValueError("Only master may publish")
+    if os.environ["GITHUB_REF"] != "refs/heads/release":
+        raise ValueError("Only the release branch may publish")
     repo = os.environ["GITHUB_REPOSITORY"]
     if gh_json("api", f"repos/{repo}")["private"]:
         raise ValueError("Make this repository public before publishing: app updates use anonymous access")

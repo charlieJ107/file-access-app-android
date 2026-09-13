@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [staging]
+    branches: [master]
   pull_request:
   workflow_dispatch:
   workflow_call:
