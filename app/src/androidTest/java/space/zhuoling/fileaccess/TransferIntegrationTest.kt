@@ -77,8 +77,9 @@ class TransferIntegrationTest {
         val config = ConnectionConfig("test", "Isolated fixture", host = "10.0.2.2", port = port!!,
             share = args.getString("smbTestShare") ?: "TEST", username = args.getString("smbTestUser") ?: "tester")
         Credentials(config.username, (args.getString("smbTestPassword") ?: "test-password").toCharArray()).use { connections.save(config, it) }
-        remote = RemoteAccess(connections, ProviderRegistry(setOf(SmbStorageProvider())))
-        engine = TransferEngine(context, tasks, backups, remote, NetworkPolicy(context))
+        val policy = NetworkPolicy(context)
+        remote = RemoteAccess(connections, ProviderRegistry(setOf(SmbStorageProvider(socketFactoryProvider = { policy.socketFactory() }))))
+        engine = TransferEngine(context, tasks, backups, remote, policy)
         root = remote.withSession("test") { session -> (session as MutationCapability).createDirectory(session.root.ref, "android-$runId") }
     }
 
@@ -140,6 +141,82 @@ class TransferIntegrationTest {
         engine.execute(id)
         assertEquals(TransferState.FAILED, tasks.get(id)?.state)
         assertTrue(remote.withSession("test") { it.list(root.ref).toList().isEmpty() })
+    }
+
+    @Test fun resumedEngineUsesRemoteCheckpointAndCompletesBackupExactlyOnce() = runBlocking {
+        val checkpoint = 4 * 1024 * 1024
+        val bytes = ByteArray(3 * checkpoint + 19) { (it % 251).toByte() }
+        val source = document(bytes, "interrupted-video.bin")
+        val rule = BackupRule(name = "Resume backup", sourceTreeUri = "content://test/tree", target = root.ref,
+            wifiOnly = false, unmeteredOnly = false)
+        backups.save(rule)
+        val id = enqueue(source, rule = rule)
+        for (boundary in listOf(checkpoint.toLong(), 2L * checkpoint)) {
+            engine.execute(id) { copied, _ ->
+                if (copied >= boundary) throw kotlinx.coroutines.CancellationException("simulated worker stop")
+            }
+            assertEquals(TransferState.WAITING, tasks.get(id)?.state)
+            assertNull(backups.baseline(rule.id, source.toString()))
+            assertTrue(tasks.makeEligibleNow(id))
+            // Replace the engine as happens when the process is recreated; no in-memory state survives.
+            engine = TransferEngine(context, tasks, backups, remote, NetworkPolicy(context))
+        }
+        var first = -1L
+        engine.execute(id) { copied, _ -> if (first < 0) first = copied }
+        assertEquals(2L * checkpoint, first)
+        assertEquals(tasks.get(id)?.error, TransferState.SUCCEEDED, tasks.get(id)?.state)
+        assertEquals(bytes.size.toLong(), tasks.get(id)?.confirmedBytes)
+        assertNotNull(backups.baseline(rule.id, source.toString()))
+        assertEquals(id, enqueue(source, rule = rule))
+        remote.withSession("test") { session ->
+            val file = session.list(root.ref).toList().single()
+            session.openRead(file.ref).use { assertArrayEquals(bytes, it.readBytes()) }
+        }
+    }
+
+    @Test fun automaticBackupAcceptsVideoAboveTheOld256MiBLimit() = runBlocking {
+        val uri = document(byteArrayOf(), "large-automatic-video.bin")
+        val length = 257L * 1024 * 1024 + 11
+        val buffer = ByteArray(256 * 1024) { (it % 251).toByte() }
+        context.contentResolver.openOutputStream(uri, "wt")!!.use { output ->
+            var remaining = length
+            while (remaining > 0) {
+                val count = minOf(buffer.size.toLong(), remaining).toInt()
+                output.write(buffer, 0, count)
+                remaining -= count
+            }
+        }
+        val rule = BackupRule(name = "Automatic large video", sourceTreeUri = "content://test/tree", target = root.ref,
+            wifiOnly = false, unmeteredOnly = false)
+        backups.save(rule)
+        val id = enqueue(uri, rule = rule)
+        withTimeout(7 * 60_000L) { engine.executeAutomatic(id) }
+        assertEquals(tasks.get(id)?.error, TransferState.SUCCEEDED, tasks.get(id)?.state)
+        assertEquals(length, tasks.get(id)?.confirmedBytes)
+        assertNotNull(backups.baseline(rule.id, uri.toString()))
+        remote.withSession("test") { session ->
+            val file = session.list(root.ref).toList().single()
+            assertEquals(length, file.size)
+            session.openRead(file.ref, length - 11).use { assertArrayEquals(buffer.copyOf(11), it.readBytes()) }
+        }
+    }
+
+    @Test fun cancelledUploadCleansWithoutNeedingSourceAccess() = runBlocking {
+        val uri = document(ByteArray(5 * 1024 * 1024) { (it % 251).toByte() }, "cancel-cleanup.bin")
+        val id = enqueue(uri)
+        engine.execute(id) { copied, _ ->
+            if (copied >= 4L * 1024 * 1024) throw kotlinx.coroutines.CancellationException("stop")
+        }
+        assertTrue(tasks.cancel(id))
+        context.contentResolver.delete(uri, null, null)
+        localUris.remove(uri)
+        engine.cleanupUploads()
+        assertEquals(tasks.get(id)?.error, TransferState.CANCELLED, tasks.get(id)?.state)
+        assertNull(tasks.get(id)?.error)
+        assertTrue(tasks.uploadCleanupCandidates(System.currentTimeMillis() + 60_000).isEmpty())
+        remote.withSession("test") { session -> (session as MutationCapability).delete(root.ref) }
+        // Recreate an empty directory for the fixture's normal tear-down.
+        root = remote.withSession("test") { session -> (session as MutationCapability).createDirectory(session.root.ref, "cleaned-$runId") }
     }
 
     @Test fun conflictingUploadNeverOverwritesExistingFile() = runBlocking {
