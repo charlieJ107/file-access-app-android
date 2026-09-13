@@ -26,7 +26,7 @@
 .\scripts\build.ps1 :app:lintDebug --console=plain
 ```
 
-Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。版本统一读取 `version.properties`。Release 签名读取 `RELEASE_STORE_FILE`、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD` 环境变量；未设置文件路径时本机仍可构建 unsigned APK。正式安装包由 GitHub Actions 构建，配置与 CLI 命令见[分支与发布规范](branching-and-releases.md)。
+Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`，使用本地开发证书。版本统一读取 `version.properties`。未设置签名环境变量时本机可构建 unsigned Release APK；现有 `RELEASE_STORE_FILE` 等本地接口仅用于独立开发证书，不能下载正式密钥使用。正式安装包由 GitHub Actions 无 Secrets 构建 unsigned APK，再独立读取原子 `RELEASE_SIGNING_BUNDLE` 签名。配置与 CLI 命令见[分支与发布规范](branching-and-releases.md)和[签名密钥管理](signing-and-rotation.md)。
 
 真实 SMB 集成测试采用独立临时共享，配置方式见 [SMB 模块说明](../protocol/smb/README.md)。没有提供测试端口时，相关集成用例会明确跳过；普通单元测试和 UI 测试仍会运行。Android 端 `TransferIntegrationTest` 使用 `smbTestPort`、`smbTestShare`、`smbTestUser`、`smbTestPassword` instrumentation 参数，模拟器访问宿主机时使用 `10.0.2.2`。参数只应指向可清理的测试共享。
 
@@ -85,6 +85,8 @@ python -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 Android `UpdateValidationTest` 验证 FileProvider 范围、摘要、版本和同签名新 APK。完整测试需在模拟器安装旧版本，并准备包名/签名相同且 SemVer 和 versionCode 更高的测试 APK。先 `adb push <fixture.apk> /data/local/tmp/fileaccess-update-fixture.apk`，再 `adb shell run-as space.zhuoling.fileaccess cp /data/local/tmp/fileaccess-update-fixture.apk files/update-fixture.apk`（debug App 的私有 files 目录需已存在）。运行 instrumentation 时传 `-e updateFixture /data/user/0/space.zhuoling.fileaccess/files/update-fixture.apk`，或通过 Gradle 的 `-Pandroid.testInstrumentationRunnerArguments.updateFixture=...`。缺少 fixture 时只跳过新版本接受测试，不能把跳过记为成功；结束后清理这两个测试文件。不要用 `connectedDebugAndroidTest` 自动安装的新版本覆盖测试所需的旧版本，需确保已安装版本低于 fixture。
+
+原生密钥轮换测试使用独立随机测试包与一次性证书，详见[签名轮换测试说明](../scripts/signing-rotation/README.md)。设备测试必须显式指定模拟器序列号；不要使用正式 keystore。`SignatureRotationTest` 检查真实 APK 的同签名、向前轮换、截短历史、旧密钥回退、历史分叉和无关签名。
 
 ## 技术依据
 

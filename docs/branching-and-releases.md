@@ -47,18 +47,16 @@ versionName=0.2.0
 
 1. 由仓库维护者在发布前将当前仓库 `charlieJ107/file-access-app-android` 设为公开。App 匿名读取 Release API；不内置 GitHub Token。工作流会在私有仓库上明确失败。
 2. 创建 GitHub Environment `release`，建议将 deployment branches 限制为 `release`；可按团队需要配置 required reviewers。
-3. 使用长期保管的正式签名 keystore，添加以下 Environment Secrets：
+3. 按 [签名密钥管理与轮换](signing-and-rotation.md) 初始化正式签名。维护者已选择正式私钥只保存在 GitHub Secrets，不保留本地正式密钥备份；本地开发使用开发证书。
 
 | Secret | 内容 |
 | --- | --- |
-| `RELEASE_KEYSTORE_BASE64` | keystore 文件的 Base64 内容 |
-| `RELEASE_STORE_PASSWORD` | keystore 密码 |
-| `RELEASE_KEY_ALIAS` | 签名密钥别名 |
-| `RELEASE_KEY_PASSWORD` | 私钥密码 |
+| `RELEASE_SIGNING_BUNDLE` | 原子 JSON：当前 keystore 的 Base64、密码、Alias、schema 和可选公开 lineage |
+| `RELEASE_NEXT_SIGNING_BUNDLE` | 仅轮换期间使用：候选签名 bundle 与本次请求的公开标识；完成或明确恢复后清理 |
 
-签名文件仅在 runner 临时目录中解码，构建结束和失败时清理；不要上传为构建 artifact。所有正式版本必须使用相同签名，本版更新器不支持签名轮换。原有 debug 安装使用不同证书，无法直接覆盖为正式版；不要通过卸载来“修复”签名错误而丢失用户数据，应提前安排首次正式版安装与数据处理。
+签名文件仅在受控临时目录中解码，结束和失败时清理；不要上传为构建 artifact。正式版本可以通过 Android 原生 proof-of-rotation 向前轮换密钥，必须携带已验证的授权链，不能只替换 Secret 后用无关联密钥发布。公开 lineage 可以保存到版本管理和 artifact；它不包含私钥。原有 debug 安装使用不同证书，无法直接覆盖为正式版；不要通过卸载来“修复”签名错误而丢失用户数据，应提前安排首次正式版安装与数据处理。
 
-GitHub Actions 的 `GITHUB_TOKEN` 仅在发布 job 获得 `contents: write`；PR 检查不使用签名 Secrets。工作流不创建私钥，缺失配置会失败。公开仓库或正式签名配置未就绪时，保留发布草稿，不合并发布 PR。
+GitHub Actions 的 `GITHUB_TOKEN` 仅在发布 job 获得 `contents: write`；PR 检查不使用正式签名 Secrets。普通发布不自动创建或轮换密钥，缺失配置会失败；维护 workflow 只创建或检查公开轮换证明，不读取管理员 Token、不直接修改 Secrets。公开仓库或正式签名配置未就绪时，保留发布草稿，不合并发布 PR。
 
 ## 日常开发与发布 CLI
 
@@ -89,7 +87,7 @@ gh release view v0.2.0
 gh release download v0.2.0 --pattern "fileaccess-*.apk" --pattern SHA256SUMS --dir release-download
 ```
 
-`.github/workflows/android-ci.yml` 覆盖 `master` push、所有 PR、手动执行和可复用调用。`.github/workflows/release.yml` 仅在 `release` push 或手动调用时启动，并在 job 和发布脚本中再次限制发布分支为 `release`。它先调用普通 CI，运行 Debug 构建、单元测试和 Lint；随后检查公开可见性、版本递增和标签指向，再构建签名 Release APK、执行 Release Lint 与 apksigner 验证，通过 `gh release create/upload/edit` 上传、核对资产并发布。
+`.github/workflows/android-ci.yml` 覆盖 `master` push、所有 PR、手动执行和可复用调用，另使用一次性测试密钥验证真实 APK 的轮换和签名脚本。`.github/workflows/release.yml` 仅在 `release` push 或手动调用时启动，并在 job 和发布脚本中再次限制发布分支为 `release`。它先调用普通 CI，再检查公开可见性、版本递增和标签指向。Gradle 在无签名 Secrets 的步骤构建 unsigned Release APK 并执行 Lint，独立签名步骤读取 bundle；如有旧正式版本，下载并验证其资产大小和摘要，再验证新 APK 对旧版签名历史的延续。签名和 zipalign 校验通过后，才通过 `gh release create/upload/edit` 上传、核对资产并发布。
 
 失败时修复配置后可 `gh run rerun <run-id> --failed`，或 `gh workflow run release.yml --ref release`。手动发布必须指定 `release`，选择 `master` 或其他分支不能发布；已公开版本不能通过重跑覆写。源码变更应发布新版本，不能把旧草稿标签改指向另一 commit。
 
@@ -101,6 +99,6 @@ gh release download v0.2.0 --pattern "fileaccess-*.apk" --pattern SHA256SUMS --d
 
 检测到新版本后显示发布说明，用户点击下载，显示进度并可取消。APK 上限 256 MiB，HTTPS 来源限制为本仓库及 GitHub 资产域名，保存于私有 `files/updates/`；失败或取消删除临时文件，下一次下载清理旧版本缓存。下载在当前进程中执行；进程被终止后从头重试，已完成文件会重新校验后复用。
 
-下载完成点击安装；首次进入“允许安装未知应用”设置，授权返回后继续；拒绝授权或取消安装可重试。FileProvider 只分享更新目录。普通 Android 应用仍需系统确认安装，不能保证静默升级。校验失败或签名不同会阻止安装。
+下载完成点击安装；首次进入“允许安装未知应用”设置，授权返回后继续；拒绝授权或取消安装可重试。FileProvider 只分享更新目录。普通 Android 应用仍需系统确认安装，不能保证静默升级。校验失败、签名无授权关联、旧密钥回退或历史分叉会阻止安装；合法向前轮换交由系统继续检验权限并完成覆盖安装。
 
 API 依据：[GitHub Releases](https://docs.github.com/en/rest/releases/releases)、[GitHub CLI release create](https://cli.github.com/manual/gh_release_create)、[Android 安装来源权限](https://developer.android.com/reference/android/content/pm/PackageManager#canRequestPackageInstalls())、[FileProvider](https://developer.android.com/reference/androidx/core/content/FileProvider)。

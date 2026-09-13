@@ -30,6 +30,8 @@ GitHub 仓库：[charlieJ107/file-access-app-android](https://github.com/charlie
 
 安装包：`app/build/outputs/apk/debug/app-debug.apk`。具体环境、依赖版本与测试命令见[开发说明](docs/development.md)。
 
+正式签名密钥仅保存在 GitHub Secrets，本地开发使用开发证书。App 和发布 CI 支持 Android 原生签名密钥向前轮换；初始化、轮换和失败恢复命令见[签名密钥管理](docs/signing-and-rotation.md)。
+
 ## 当前功能
 
 - 保存、测试和编辑 SMB 连接，凭据由 Android Keystore 加密保存。

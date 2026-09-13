@@ -67,29 +67,45 @@ jobs:
           fi
           test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
 
-      - name: Build and verify signed APK
+      - name: Build unsigned release APK and lint without signing secrets
+        run: |
+          ./gradlew --no-daemon --console=plain --max-workers=2 :app:assembleRelease :app:lintRelease
+          test -f app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Download the previous release to verify signing continuity
+        if: steps.version.outputs.previous_tag != ''
         env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_STORE_FILE: ${{ runner.temp }}/fileaccess-release.jks
-          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          VERSION_CODE: ${{ steps.version.outputs.code }}
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+          PREVIOUS_ASSET: ${{ steps.version.outputs.previous_asset }}
+          PREVIOUS_SHA256: ${{ steps.version.outputs.previous_sha256 }}
+          PREVIOUS_SIZE: ${{ steps.version.outputs.previous_size }}
         run: |
           set -euo pipefail
-          : "${RELEASE_KEYSTORE_BASE64:?Missing signing keystore}"
-          : "${RELEASE_STORE_PASSWORD:?Missing store password}"
-          : "${RELEASE_KEY_ALIAS:?Missing signing alias}"
-          : "${RELEASE_KEY_PASSWORD:?Missing key password}"
-          trap 'rm -f "$RELEASE_STORE_FILE"' EXIT
-          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
-          chmod 600 "$RELEASE_STORE_FILE"
-          ./gradlew --no-daemon --console=plain --max-workers=2 :app:assembleRelease :app:lintRelease
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
-          mkdir -p build/release
-          cp app/build/outputs/apk/release/app-release.apk "build/release/fileaccess-$VERSION_CODE.apk"
-          cd build/release
-          sha256sum "fileaccess-$VERSION_CODE.apk" > SHA256SUMS
+          mkdir -p "$RUNNER_TEMP/fileaccess-previous"
+          gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$PREVIOUS_ASSET" --dir "$RUNNER_TEMP/fileaccess-previous"
+          cd "$RUNNER_TEMP/fileaccess-previous"
+          test "$(stat -c '%s' "$PREVIOUS_ASSET")" = "$PREVIOUS_SIZE"
+          printf '%s  %s\n' "$PREVIOUS_SHA256" "$PREVIOUS_ASSET" | sha256sum --check --status
+          mv "$PREVIOUS_ASSET" previous.apk
+
+      - name: Sign with the current key and verify forward signing continuity
+        env:
+          RELEASE_SIGNING_BUNDLE: ${{ secrets.RELEASE_SIGNING_BUNDLE }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          previous=()
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            previous=(--previous-apk "$RUNNER_TEMP/fileaccess-previous/previous.apk")
+          fi
+          python3 scripts/sign-release.py \
+            --input app/build/outputs/apk/release/app-release-unsigned.apk \
+            --output "build/release/fileaccess-$VERSION_CODE.apk" \
+            --build-tools "$ANDROID_HOME/build-tools/36.0.0" \
+            --checksum-file build/release/SHA256SUMS "${previous[@]}"
 
       - name: Create draft, upload and publish release using GitHub CLI
         env:
@@ -113,6 +129,9 @@ jobs:
           python3 scripts/verify-release-assets.py build/release/metadata.json "build/release/fileaccess-$VERSION_CODE.apk"
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
-      - name: Clean signing material
+      - name: Clean signing material and previous release download
         if: always()
-        run: rm -f "$RUNNER_TEMP/fileaccess-release.jks"
+        # Normal failures are cleaned by Python; also cover forced process termination.
+        run: |
+          find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'fileaccess-signing-*' -exec rm -rf -- {} +
+          rm -f "$RUNNER_TEMP/fileaccess-previous/previous.apk"
