@@ -1,8 +1,8 @@
 # 媒体缩略图与网格视图：功能设计和实施方案
 
-日期：2026-09-13。状态：待评审方案，尚未实现或进行性能验收。
+日期：2026-09-13。状态：方案已获用户批准，功能已在独立分支实现。本文保留原设计目标；实际实现取舍、已运行测试和剩余验收边界见[实现与交接记录](../media-thumbnails.md)。
 
-基线：`c0de6e4`。独立分支：`design/media-thumbnails-grid`；工作树：`D:/Android/AndroidStudioProjects/FileAccess-media-grid`。本次交付设计，后续由功能实现提交落地，再交给专门负责合并的 agent 集成。
+基线：`c0de6e4`。独立分支：`design/media-thumbnails-grid`；工作树：`D:/Android/AndroidStudioProjects/FileAccess-media-grid`。设计与功能实现分别提交，交给专门负责合并的 agent 集成。
 
 ## 1. 目标与范围
 
