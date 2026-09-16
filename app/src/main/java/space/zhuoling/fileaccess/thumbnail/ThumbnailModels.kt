@@ -11,7 +11,7 @@ enum class MediaKind { IMAGE, VIDEO, AUDIO, FILE, DIRECTORY }
 
 fun mediaKind(entry: RemoteEntry): MediaKind {
     if (entry.isDirectory) return MediaKind.DIRECTORY
-    val mime = entry.mimeType?.lowercase(Locale.ROOT)
+    val mime = entry.mimeType?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
     if (mime != null && mime != "application/octet-stream") return when {
         mime.startsWith("image/") && mime != "image/svg+xml" -> MediaKind.IMAGE
         mime.startsWith("video/") -> MediaKind.VIDEO

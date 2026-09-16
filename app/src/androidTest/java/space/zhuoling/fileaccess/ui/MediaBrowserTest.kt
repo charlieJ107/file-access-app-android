@@ -15,6 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import space.zhuoling.fileaccess.BrowserState
+import space.zhuoling.fileaccess.R
 import space.zhuoling.fileaccess.core.model.*
 import space.zhuoling.fileaccess.thumbnail.ThumbnailFixture
 
@@ -54,6 +55,35 @@ class MediaBrowserTest {
         compose.onNodeWithText("photo.png").performClick()
         compose.onNodeWithText("网络中断，目录未加载完整").assertIsDisplayed()
         compose.runOnIdle { assertEquals(listOf(file, file), opened) }
+    }
+
+    @Test fun listAndGridPreviewCallbacksUseTheFilteredVisibleOrderAndCurrentSort() {
+        data class PreviewCall(val selected: RemoteEntry, val entries: List<RemoteEntry>, val query: String, val sort: Int)
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val smallest = file.copy(ref = EntryRef("fixture", "small"), name = "trip-a.jpg", size = 10)
+        val largest = file.copy(ref = EntryRef("fixture", "large"), name = "trip-z.jpg", size = 30)
+        val selected = file.copy(ref = EntryRef("fixture", "selected"), name = "trip-b.mp4", size = 20)
+        val excluded = file.copy(ref = EntryRef("fixture", "excluded"), name = "holiday.jpg", size = 100)
+        val previews = mutableListOf<PreviewCall>()
+        val opened = mutableListOf<RemoteEntry>()
+        compose.setContent { FileAccessTheme {
+            BrowserScreen(BrowserState(root, listOf(smallest, largest, selected, excluded), complete = true), false,
+                { opened += it }, {}, {}, { _, _ -> }, {}, {}, {}, {},
+                onPreview = { entry, visible, query, sort -> previews += PreviewCall(entry, visible, query, sort) })
+        } }
+        compose.onNode(hasSetTextAction()).performTextInput("tRiP")
+        compose.onNodeWithContentDescription(context.getString(R.string.screen_sort)).performClick()
+        compose.onNodeWithText(context.getString(R.string.screen_sort_size)).performClick()
+        compose.onNodeWithText(excluded.name).assertDoesNotExist()
+        repeat(2) { layout ->
+            if (layout == 1) compose.onNodeWithContentDescription(context.getString(R.string.media_switch_grid)).performClick()
+            compose.onNodeWithText(selected.name).performClick()
+            compose.runOnIdle {
+                assertEquals(layout + 1, previews.size)
+                assertEquals(PreviewCall(selected, listOf(largest, selected, smallest), "tRiP", 2), previews.last())
+                assertTrue(opened.isEmpty())
+            }
+        }
     }
 
     @Test fun tenThousandEntriesStayLazyAndLayoutSwitchPreservesVisibleAnchor() {
