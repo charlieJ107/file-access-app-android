@@ -22,6 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -32,13 +33,15 @@ import space.zhuoling.fileaccess.R
 import space.zhuoling.fileaccess.core.model.*
 import space.zhuoling.fileaccess.core.transfer.RemoteAccess
 import space.zhuoling.fileaccess.preview.PreviewRepository
+import space.zhuoling.fileaccess.preview.PreviewSessionRequest
+import space.zhuoling.fileaccess.preview.PreviewViewModel
 
 @Serializable private data object Spaces : NavKey
 @Serializable private data object Transfers : NavKey
 @Serializable private data object Backups : NavKey
 @Serializable private data object Settings : NavKey
 @Serializable private data class Browse(val connectionId: String, val opaqueId: String = "", val name: String = "") : NavKey
-@Serializable private data class Preview(val connectionId: String, val opaqueId: String) : NavKey
+@Serializable private data class Preview(val request: PreviewSessionRequest) : NavKey
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +53,11 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
     val resources = LocalResources.current
     val stack = rememberNavBackStack(Spaces)
     val current = stack.lastOrNull() ?: Spaces
+    val previewModel: PreviewViewModel = hiltViewModel()
+    LaunchedEffect(current) {
+        if (current is Preview) previewModel.open(current.request)
+        else if (stack.none { it is Preview }) previewModel.close()
+    }
     val snackbar = remember { SnackbarHostState() }
     val message by model.message.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
@@ -175,11 +183,16 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
                                     onEdit = { editConnectionId = it.id; showEditor = true }, onRemove = { removeConnection = it })
                             }
                             entry<Browse> { key ->
-                                LaunchedEffect(key) { model.loadDirectory(key.connectionId, key.opaqueId) }
+                                LaunchedEffect(key) { model.ensureDirectory(key.connectionId, key.opaqueId) }
                                 val state by model.browser.collectAsStateWithLifecycle()
                                 val displayed = if (state.requestedRef == EntryRef(key.connectionId, key.opaqueId)) state else space.zhuoling.fileaccess.BrowserState(loading = true)
                                 BrowserScreen(displayed, busy,
-                                    onOpen = { if (it.isDirectory) stack.add(Browse(it.ref.connectionId, it.ref.opaqueId, it.name)) else stack.add(Preview(it.ref.connectionId, it.ref.opaqueId)) },
+                                    onOpen = { stack.add(Browse(it.ref.connectionId, it.ref.opaqueId, it.name)) },
+                                    onPreview = { selected, visible, query, sort ->
+                                        val request = previewModel.start(EntryRef(key.connectionId, key.opaqueId), selected,
+                                            visible, query, sort, !displayed.complete, displayed.connectionRevision)
+                                        stack.add(Preview(request))
+                                    },
                                     onUpload = {
                                         state.directory?.ref?.let { uploadConnection = it.connectionId; uploadDirectory = it.opaqueId; uploadPicker.launch(arrayOf("*/*")) }
                                     }, onCreateDirectory = model::createDirectory,
@@ -189,8 +202,8 @@ fun FileAccessApp(model: MainViewModel, previewRepository: PreviewRepository, re
                                     viewMode = settings.browserViewMode, onViewModeChange = model::setBrowserViewMode,
                                     thumbnails = model.thumbnails, unmeteredOnly = settings.mediaThumbnailsUnmeteredOnly)
                             }
-                            entry<Preview> { key ->
-                                PreviewScreen(EntryRef(key.connectionId, key.opaqueId), previewRepository, remote, ::download)
+                            entry<Preview> {
+                                PreviewScreen(previewModel, previewRepository, remote, ::download)
                             }
                             entry<Transfers> { TransfersScreen(tasks, model::pauseTransfer, model::resumeTransfer, model::cancelTransfer) }
                             entry<Backups> { BackupScreen(rules, tasks, model::toggleRule, model::deleteRule, { requestNotifications(); model.backupNow() }, { navigate(Spaces) }) }

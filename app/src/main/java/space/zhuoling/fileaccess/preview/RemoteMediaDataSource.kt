@@ -14,7 +14,11 @@ import space.zhuoling.fileaccess.core.transfer.RemoteAccess
 
 /** Media3 invokes this on its loader thread. Each seek checks the revision and holds a read handle. */
 @UnstableApi
-class RemoteMediaDataSource(private val entry: RemoteEntry, private val remote: RemoteAccess) : BaseDataSource(true) {
+class RemoteMediaDataSource(
+    private val entry: RemoteEntry,
+    private val remote: RemoteAccess,
+    private val expectedConfigRevision: Long? = null,
+) : BaseDataSource(true) {
     private var session: StorageSession? = null
     private var input: InputStream? = null
     private var uri: Uri? = null
@@ -24,7 +28,7 @@ class RemoteMediaDataSource(private val entry: RemoteEntry, private val remote: 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
         try {
-            session = runBlocking { remote.open(entry.ref.connectionId) }
+            session = runBlocking { remote.open(entry.ref.connectionId, expectedConfigRevision) }
             input = runBlocking { session!!.openRead(entry.ref, dataSpec.position, entry.revision) }
             val available = entry.size?.let { it - dataSpec.position }
             if (available != null && available < 0) throw EOFException("Position exceeds file length")

@@ -43,6 +43,7 @@ internal class ThumbnailFixture(base: Context) {
     val streams = AtomicInteger()
     val offsets = java.util.Collections.synchronizedList(mutableListOf<Long>())
     var openDelay = 0L
+    @Volatile var beforeRead: (() -> Unit)? = null
     var deny = false
     private val root = RemoteEntry(EntryRef("fixture", ""), "测试媒体", true)
     val provider = object : StorageProvider {
@@ -78,7 +79,10 @@ internal class ThumbnailFixture(base: Context) {
                 reads.incrementAndGet(); offsets += offset; streams.incrementAndGet()
                 return object : ByteArrayInputStream(files.getValue(ref.opaqueId).copyOfRange(offset.toInt(), files.getValue(ref.opaqueId).size)) {
                     private var done = false
-                    override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) bytesRead.addAndGet(it) }
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        beforeRead?.invoke()
+                        return super.read(b, off, len).also { if (it > 0) bytesRead.addAndGet(it) }
+                    }
                     override fun close() { if (!done) { done = true; streams.decrementAndGet() }; super.close() }
                 }
             }

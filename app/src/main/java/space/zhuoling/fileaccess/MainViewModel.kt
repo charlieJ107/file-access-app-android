@@ -112,6 +112,10 @@ class MainViewModel @Inject constructor(
     fun clearMessage() { _message.value = null }
     fun notify(message: String) { _message.value = message }
 
+    fun ensureDirectory(connectionId: String, opaqueId: String = "") {
+        if (_browser.value.requestedRef != EntryRef(connectionId, opaqueId)) loadDirectory(connectionId, opaqueId)
+    }
+
     fun loadDirectory(connectionId: String, opaqueId: String = "") {
         requestedDirectory = EntryRef(connectionId, opaqueId)
         listing?.cancel()

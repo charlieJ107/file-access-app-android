@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 import space.zhuoling.fileaccess.BrowserState
 import space.zhuoling.fileaccess.R
 import space.zhuoling.fileaccess.core.model.*
@@ -22,6 +21,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import space.zhuoling.fileaccess.thumbnail.*
 import space.zhuoling.fileaccess.ui.browser.*
+import space.zhuoling.fileaccess.preview.sortAndFilterEntries
 import kotlinx.coroutines.launch
 
 @Composable
@@ -31,6 +31,7 @@ fun BrowserScreen(state: BrowserState, busy: Boolean, onOpen: (RemoteEntry) -> U
     directoryKey: String = state.directory?.ref?.let(::entryKey) ?: "",
     viewMode: String = "list", onViewModeChange: (String) -> Unit = {},
     thumbnails: ThumbnailRepository? = null, unmeteredOnly: Boolean = true,
+    onPreview: ((RemoteEntry, List<RemoteEntry>, String, Int) -> Unit)? = null,
 ) = Page {
     var modeOverride by rememberSaveable { mutableStateOf<String?>(null) }
     val grid = (modeOverride ?: viewMode) == "grid"
@@ -54,13 +55,7 @@ fun BrowserScreen(state: BrowserState, busy: Boolean, onOpen: (RemoteEntry) -> U
     var rename by remember { mutableStateOf<RemoteEntry?>(null) }
     var deleting by remember { mutableStateOf<List<RemoteEntry>?>(null) }
     val entries = remember(state.entries, query, sort) {
-        val filtered = state.entries.filter { it.name.contains(query, ignoreCase = true) }
-        val order = when (sort) {
-            1 -> compareByDescending<RemoteEntry> { it.modifiedAtEpochMillis ?: Long.MIN_VALUE }
-            2 -> compareByDescending<RemoteEntry> { it.size ?: -1 }
-            else -> compareBy { it.name.lowercase(Locale.ROOT) }
-        }
-        filtered.sortedWith(compareByDescending<RemoteEntry> { it.isDirectory }.then(order).thenBy { it.name })
+        sortAndFilterEntries(state.entries, query, sort)
     }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,7 +130,10 @@ fun BrowserScreen(state: BrowserState, busy: Boolean, onOpen: (RemoteEntry) -> U
             var menu by remember { mutableStateOf(false) }
             fun toggle() { selection = if (entry.ref in selection) selection - entry.ref else selection + entry.ref }
             FileBrowserItem(entry, grid, entry.ref in selection, selection.isNotEmpty(), entryDetail(entry),
-                onOpen = { onOpen(entry) }, onToggle = ::toggle,
+                onOpen = {
+                    if (!entry.isDirectory && onPreview != null) onPreview(entry, entries, query, sort)
+                    else onOpen(entry)
+                }, onToggle = ::toggle,
                 thumbnail = { modifier ->
                     key(generation, state.connectionRevision) {
                         RemoteThumbnail(entry, state.connectionRevision, state.listingEpoch xor (generation shl 32), visible, thumbnails, budget,

@@ -19,22 +19,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
 import androidx.core.graphics.createBitmap
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.PlayerView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import space.zhuoling.fileaccess.R
 import space.zhuoling.fileaccess.core.model.EntryRef
@@ -43,63 +35,145 @@ import space.zhuoling.fileaccess.core.model.StorageError
 import space.zhuoling.fileaccess.core.model.StorageException
 import space.zhuoling.fileaccess.core.transfer.RemoteAccess
 import space.zhuoling.fileaccess.preview.PreviewRepository
-import space.zhuoling.fileaccess.preview.RemoteMediaDataSource
+import space.zhuoling.fileaccess.preview.PreviewViewModel
+import space.zhuoling.fileaccess.thumbnail.MediaKind
+import space.zhuoling.fileaccess.thumbnail.mediaKind
+import space.zhuoling.fileaccess.userMessage
 
 @Composable
-fun PreviewScreen(ref: EntryRef, repository: PreviewRepository, remote: RemoteAccess, onDownload: (RemoteEntry) -> Unit) {
-    var entry by remember(ref) { mutableStateOf<RemoteEntry?>(null) }
-    var mime by remember(ref) { mutableStateOf("") }
-    var text by remember(ref) { mutableStateOf<Pair<String, Boolean>?>(null) }
-    var file by remember(ref) { mutableStateOf<File?>(null) }
-    var error by remember(ref) { mutableStateOf<Int?>(null) }
-    var loading by remember(ref) { mutableStateOf(true) }
-    LaunchedEffect(ref) {
-        try {
-            val loaded = remote.withSession(ref.connectionId) { it.stat(ref) }
-            entry = loaded
-            mime = repository.mime(loaded)
-            when {
-                mime.startsWith("text/") || mime in setOf("application/json", "application/xml") -> text = repository.text(loaded)
-                mime.startsWith("image/") || mime == "application/pdf" -> file = repository.cachedFile(loaded)
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: Exception) {
-            error = if ((failure as? StorageException)?.error == StorageError.QUOTA_EXCEEDED) R.string.preview_too_large else R.string.preview_error
-        } finally { loading = false }
-    }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        entry?.let { loaded ->
-            Text(loaded.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-            TextButton(onClick = { onDownload(loaded) }) { Text(stringResource(R.string.download_file)) }
-        }
-        when {
-            loading -> { CircularProgressIndicator(); Text(stringResource(R.string.preview_loading)) }
-            error != null -> Text(stringResource(error!!))
-            text != null -> {
-                if (text!!.second) Text(stringResource(R.string.preview_truncated), style = MaterialTheme.typography.labelMedium)
-                val chunks = remember(text) { text!!.first.chunked(4096) }
-                SelectionContainer {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(chunks) { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth()) }
-                    }
+fun PreviewScreen(model: PreviewViewModel, repository: PreviewRepository, remote: RemoteAccess, onDownload: (RemoteEntry) -> Unit) {
+    val state by model.state.collectAsStateWithLifecycle()
+    when {
+        state.restoring || state.sessionId.isEmpty() -> PreviewLoading()
+        state.items.isEmpty() -> PreviewFailure(detail = state.error, onRetry = model::retry)
+        else -> key(state.sessionId) {
+            val loadedEntries = remember { mutableStateMapOf<EntryRef, RemoteEntry>() }
+            Column(Modifier.fillMaxSize()) {
+                if (state.error != null) PreviewFailure(detail = state.error, onRetry = model::retry)
+                MediaPreviewPager(
+                    items = state.items, initialIndex = state.currentIndex, partial = state.partial,
+                    onSettled = model::select, onDownload = { onDownload(loadedEntries[it.ref] ?: it) },
+                    modifier = Modifier.weight(1f),
+                ) { item, active, dragging, onScrubbing ->
+                    if (active) PreviewItem(
+                        item, repository, remote, dragging,
+                        position = model::position,
+                        onPositionSaved = model::savePosition,
+                        onLoaded = { loadedEntries[item.ref] = it },
+                        onScrubbing = onScrubbing,
+                        expectedConfigRevision = state.connectionRevision,
+                    ) else PreviewPlaceholder(item)
                 }
             }
-            file != null && mime.startsWith("image/") -> AsyncImage(file, entry?.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            file != null && mime == "application/pdf" -> PdfPreview(file!!)
-            entry != null && (mime.startsWith("video/") || mime.startsWith("audio/")) -> MediaPreview(entry!!, remote)
-            else -> Text(stringResource(R.string.preview_unsupported))
+        }
+    }
+}
+
+/** Only the settled page composes this loader. Scrolling cancels pending remote work. */
+@Composable
+private fun PreviewItem(
+    item: RemoteEntry, repository: PreviewRepository, remote: RemoteAccess, dragging: Boolean,
+    position: (RemoteEntry) -> Long, onPositionSaved: (RemoteEntry, Long) -> Unit, onLoaded: (RemoteEntry) -> Unit,
+    onScrubbing: (Boolean) -> Unit, expectedConfigRevision: Long?,
+) {
+    var retry by remember(item.ref) { mutableIntStateOf(0) }
+    key(item.ref, retry) {
+        var entry by remember { mutableStateOf<RemoteEntry?>(null) }
+        var mime by remember { mutableStateOf("") }
+        var text by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+        var file by remember { mutableStateOf<File?>(null) }
+        var error by remember { mutableStateOf<Int?>(null) }
+        var errorDetail by remember { mutableStateOf<String?>(null) }
+        var loading by remember { mutableStateOf(true) }
+        val latestLoaded by rememberUpdatedState(onLoaded)
+        LaunchedEffect(dragging) {
+            if (dragging || !loading) return@LaunchedEffect
+            try {
+                val loaded = repository.stat(item.ref, expectedConfigRevision)
+                val loadedMime = repository.mime(loaded)
+                val kind = mediaKind(loaded)
+                val loadedText = if (loadedMime.startsWith("text/") || loadedMime in setOf("application/json", "application/xml")) {
+                    repository.text(loaded, expectedConfigRevision)
+                } else null
+                val loadedFile = if (kind == MediaKind.IMAGE || loadedMime == "application/pdf") {
+                    repository.cachedFile(loaded, expectedConfigRevision, forceReload = retry > 0)
+                } else null
+                // Blocking adapters can finish after cancellation; never publish their stale result.
+                coroutineContext.ensureActive()
+                entry = loaded
+                mime = loadedMime
+                text = loadedText
+                file = loadedFile
+                latestLoaded(loaded)
+                loading = false
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                coroutineContext.ensureActive()
+                error = if ((failure as? StorageException)?.error == StorageError.QUOTA_EXCEEDED) R.string.preview_too_large else R.string.preview_error
+                errorDetail = (failure as? StorageException)?.takeUnless { it.error == StorageError.QUOTA_EXCEEDED }?.userMessage()
+                loading = false
+            }
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when {
+                error != null -> PreviewFailure(error!!, detail = errorDetail, onRetry = { retry++ })
+                loading -> PreviewLoading()
+                text != null -> Column(Modifier.fillMaxSize()) {
+                    if (text!!.second) Text(stringResource(R.string.preview_truncated), style = MaterialTheme.typography.labelMedium)
+                    val chunks = remember(text) { text!!.first.chunked(4096) }
+                    SelectionContainer {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(chunks) { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth()) }
+                        }
+                    }
+                }
+                file != null && mediaKind(entry!!) == MediaKind.IMAGE -> {
+                    val context = LocalContext.current
+                    val request = remember(file) {
+                        ImageRequest.Builder(context).data(file).memoryCacheKey("${file!!.path}:${file!!.lastModified()}:$retry").build()
+                    }
+                    AsyncImage(request, entry!!.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit,
+                        onError = { error = R.string.preview_error })
+                }
+                file != null && mime == "application/pdf" -> PdfPreview(file!!, onRetry = { retry++ })
+                entry != null && mediaKind(entry!!) in setOf(MediaKind.VIDEO, MediaKind.AUDIO) -> MediaPreviewPlayer(
+                    entry = entry!!, remote = remote, active = true, isPagerDragging = dragging,
+                    initialPositionMs = position(entry!!), onPositionSaved = { onPositionSaved(entry!!, it) },
+                    onError = { error = R.string.preview_error }, onControlScrubbingChanged = onScrubbing,
+                    modifier = Modifier.fillMaxSize(),
+                    expectedConfigRevision = expectedConfigRevision,
+                )
+                else -> Text(stringResource(R.string.preview_unsupported))
+            }
         }
     }
 }
 
 @Composable
-private fun PdfPreview(file: File) {
+internal fun PreviewLoading() {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        CircularProgressIndicator()
+        Text(stringResource(R.string.preview_loading), Modifier.padding(8.dp))
+    }
+}
+
+@Composable
+internal fun PreviewFailure(message: Int = R.string.preview_error, detail: String? = null, onRetry: () -> Unit) {
+    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(detail ?: stringResource(message))
+        TextButton(onClick = onRetry) { Text(stringResource(R.string.preview_retry)) }
+    }
+}
+
+@Composable
+private fun PdfPreview(file: File, onRetry: () -> Unit) {
     var page by rememberSaveable(file.path) { mutableIntStateOf(0) }
     var count by remember(file) { mutableIntStateOf(0) }
     var bitmap by remember(file) { mutableStateOf<Bitmap?>(null) }
     var failed by remember(file) { mutableStateOf(false) }
     LaunchedEffect(file, page) {
         bitmap = null
+        failed = false
         try {
             val rendered = withContext(Dispatchers.IO) {
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -127,37 +201,9 @@ private fun PdfPreview(file: File) {
             TextButton(onClick = { page++ }, enabled = page + 1 < count) { Text(stringResource(R.string.next_page)) }
         }
         when {
-            failed -> Text(stringResource(R.string.preview_error))
+            failed -> PreviewFailure(onRetry = onRetry)
             bitmap != null -> Image(bitmap!!.asImageBitmap(), stringResource(R.string.pdf_page, page + 1, count), Modifier.weight(1f), contentScale = ContentScale.Fit)
             else -> CircularProgressIndicator()
         }
     }
-}
-
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@Composable
-private fun MediaPreview(entry: RemoteEntry, remote: RemoteAccess) {
-    val context = LocalContext.current
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var failed by remember(entry.ref) { mutableStateOf(false) }
-    val player = remember(entry.ref, entry.revision) {
-        ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(
-            DataSource.Factory { RemoteMediaDataSource(entry, remote) },
-        )).build().apply {
-            setMediaItem(MediaItem.fromUri("fileaccess://preview/${android.net.Uri.encode(entry.name)}"))
-            prepare()
-        }
-    }
-    DisposableEffect(player, lifecycle) {
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) { failed = true }
-        }
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) player.pause() }
-        player.addListener(listener)
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); player.removeListener(listener); player.release() }
-    }
-    if (failed) Text(stringResource(R.string.preview_error))
-    AndroidView(factory = { PlayerView(it).apply { this.player = player; keepScreenOn = true } },
-        update = { it.player = player }, modifier = Modifier.fillMaxSize(), onRelease = { it.player = null })
 }
