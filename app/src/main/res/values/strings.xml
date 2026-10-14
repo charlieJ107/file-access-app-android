@@ -27,4 +27,12 @@
     <string name="previous_page">上一页</string>
     <string name="next_page">下一页</string>
     <string name="pdf_page">第 %1$d / %2$d 页</string>
+    <string name="preview_previous_media">上一个</string>
+    <string name="preview_next_media">下一个</string>
+    <string name="preview_media_position">%1$d / %2$d</string>
+    <string name="preview_partial_queue">仅浏览当前列表中已加载的媒体</string>
+    <string name="preview_retry">重试</string>
+    <string name="preview_play">播放</string>
+    <string name="preview_pause">暂停</string>
+    <string name="preview_seek">播放进度</string>
 </resources>

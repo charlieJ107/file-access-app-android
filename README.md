@@ -39,7 +39,7 @@ GitHub 公开仓库：[charlieJ107/file-access-app-android](https://github.com/c
 - 保存、测试和编辑 SMB 连接，凭据由 Android Keystore 加密保存。
 - 浏览目录、当前目录筛选、批量选择、新建目录、重命名、删除文件或空目录。
 - 列表／自适应网格切换，图片缩略图、视频封面与时长；独立缓存和网络读取预算。详见[媒体实现与验证](docs/media-thumbnails.md)。
-- 文本、图片、PDF 预览；Media3 从 SMB 按范围读取音视频。
+- 文本、图片、PDF 预览；媒体可在查看界面左右滑动切换，Media3 从 SMB 按范围读取音视频。详见[媒体连续预览](docs/media-preview.md)。
 - 系统文件选择器上传/下载；数据库保存任务，支持暂停、继续、取消、进度与失败原因。
 - 相机照片/视频及用户授权目录的增量备份；按 Wi-Fi、计费网络、充电条件执行；本机删除不删除 NAS 副本。
 - SMB 签名默认开启；可要求 SMB3 加密；不支持 SMB1 和匿名回退。
